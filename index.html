@@ -6,176 +6,91 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <style>
-  body {
-    font-family: Arial, "Microsoft JhengHei", sans-serif;
-    margin: 0;
-    padding: 24px;
-    color: #222;
-    background: #f4f6f5;
-  }
-  h1 { font-size: 22px; margin-top: 0; }
-  .grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 12px;
-    margin: 12px 0;
-  }
-  @media (max-width: 800px) { .grid { grid-template-columns: 1fr; } }
-  .drop {
-    border: 2px dashed #1F4E79;
-    border-radius: 12px;
-    padding: 28px 16px;
-    text-align: center;
-    color: #1F4E79;
-    background: #f4f8fb;
-    cursor: pointer;
-    min-height: 120px;
-    box-sizing: border-box;
-  }
-  .drop.over { background: #e3eef8; border-color: #0d3a5c; }
-  .drop .title { font-weight: 700; font-size: 15px; margin-bottom: 6px; }
-  .drop .fname { font-size: 13px; color: #555; margin-top: 10px; word-break: break-all; }
-  .drop .fname.empty { color: #999; }
-  .btns { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 4px; }
-  .btn {
-    border: 0;
-    background: #1F4E79;
-    color: #fff;
-    font-weight: 700;
-    padding: 10px 16px;
-    border-radius: 10px;
-    cursor: pointer;
-    font-size: 14px;
-  }
-  .btn:disabled { background: #a0aec0; cursor: not-allowed; }
-  .btn2 { background: #e2e8f0; color: #334155; }
-  .cards {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-    gap: 12px;
-    margin: 16px 0;
-  }
-  .card {
-    border: 1px solid #ddd;
-    border-radius: 8px;
-    padding: 14px 12px;
-    background: #f7f9fb;
-    aspect-ratio: 1;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    text-align: center;
-    box-sizing: border-box;
-  }
-  .card .label { font-size: 13px; color: #444; line-height: 1.3; }
-  .card b { font-size: 28px; display: block; margin-top: 8px; color: #1F4E79; }
-  .result-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-    gap: 12px;
-    margin: 8px 0 18px;
-  }
-  .result-card {
-    background: #fff;
-    border: 1px solid #d8dde3;
-    border-radius: 12px;
-    padding: 12px 14px;
-    box-shadow: 0 1px 3px rgba(0,0,0,.08);
-    min-height: 120px;
-    box-sizing: border-box;
-  }
-  .result-card .tn {
-    font-weight: 700;
-    font-size: 15px;
-    color: #1F4E79;
-    margin-bottom: 8px;
-  }
-  .result-card .row {
-    font-size: 12px;
-    color: #555;
-    margin: 3px 0;
-    line-height: 1.35;
-  }
-  .result-card .row span { color: #888; }
-  .result-empty {
-    color: #0a7a2f;
-    font-weight: bold;
-    display: flex;
-    align-items: center;
-    min-height: 60px;
-  }
-  .ok { color: #0a7a2f; font-weight: bold; }
-  .bad { color: #b00020; font-weight: bold; }
-  .note { color: #555; font-size: 13px; }
-  h2 { font-size: 16px; margin-top: 28px; border-bottom: 1px solid #ccc; padding-bottom: 4px; }
-  .table-wrap { overflow-x: auto; margin: 8px 0 18px; background: #fff; border: 1px solid #d8dde3; border-radius: 8px; }
-  table.excel {
-    border-collapse: collapse;
-    width: 100%;
-    min-width: 900px;
-    font-size: 13px;
-    background: #fff;
-  }
-  table.excel th, table.excel td {
-    border: 1px solid #c5cdd6;
-    padding: 6px 8px;
-    text-align: left;
-    vertical-align: top;
-    white-space: nowrap;
-  }
-  table.excel th {
-    background: #1F4E79;
-    color: #fff;
-    font-weight: 700;
-    position: sticky;
-    top: 0;
-    z-index: 1;
-  }
-  table.excel tbody tr:nth-child(even) { background: #f3f6f9; }
-  table.excel td.changed { background: #fff2cc; color: #222; font-weight: 600; }
-  table.excel td.same { color: #999; background: #fff; }
-  table.excel th.sub { background: #2e6a9e; font-weight: 600; font-size: 12px; }
-  table.excel td.tree-no { position: sticky; left: 0; background: #fff; z-index: 2; font-weight: 700; color: #1F4E79; }
-  table.excel tbody tr:nth-child(even) td.tree-no { background: #f3f6f9; }
-  table.excel .corner { background: #1F4E79; }
-  .excel-caption { font-size: 12px; color: #666; margin: 4px 0 8px; }
-  .section-actions { margin: 8px 0 4px; }
-  .btn-sm {
-    border: 0;
-    background: #1F4E79;
-    color: #fff;
-    font-weight: 700;
-    padding: 8px 14px;
-    border-radius: 8px;
-    cursor: pointer;
-    font-size: 13px;
-  }
-  .btn-sm:disabled { background: #a0aec0; cursor: not-allowed; }
+:root{--g:#14532d;--bg:#f3f6f3;--line:#d5e0d5;--ok:#166534;--bad:#b91c1c}
+*{box-sizing:border-box}
+body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Noto Sans TC","PingFang HK",sans-serif;background:var(--bg);color:#0f172a}
+header{background:var(--g);color:#fff;padding:16px 20px}
+header h1{margin:0;font-size:18px}
+header p{margin:4px 0 0;opacity:.85;font-size:13px}
+.wrap{max-width:1200px;margin:0 auto;padding:16px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:12px 0}
+@media(max-width:800px){.grid{grid-template-columns:1fr}}
+.card{background:#fff;border-radius:14px;padding:14px;box-shadow:0 1px 2px rgba(0,0,0,.05)}
+.drop{border:2px dashed var(--line);border-radius:12px;padding:12px;margin-top:4px;background:#f8faf8;font-size:12px;color:#475569;text-align:center;cursor:pointer}
+.drop.over{border-color:var(--g);background:#ecfdf3}
+.drop .title{font-weight:700;font-size:13px;color:#0f172a;margin-bottom:4px}
+.drop .fname{font-size:12px;color:#64748b;margin-top:8px;word-break:break-all}
+.drop .fname.empty{color:#94a3b8}
+.btns{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0}
+.btn{border:0;background:var(--g);color:#fff;font-weight:800;padding:10px 14px;border-radius:12px;cursor:pointer;font-size:14px}
+.btn:disabled{background:#94a3b8;cursor:not-allowed}
+.btn2{background:#e2e8f0;color:#334155}
+.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:12px 0}
+@media(max-width:900px){.kpis{grid-template-columns:repeat(2,1fr)}}
+.kpi{background:#fff;border-radius:12px;padding:12px;text-align:center;box-shadow:0 1px 2px rgba(0,0,0,.05)}
+.kpi b{display:block;font-size:22px;color:var(--g)}
+.kpi span{font-size:12px;color:#64748b}
+.result-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px;margin:8px 0 16px}
+.result-card{background:#fff;border:1px solid var(--line);border-radius:14px;padding:10px 12px;box-shadow:0 1px 2px rgba(0,0,0,.05);box-sizing:border-box}
+.result-card .tn{font-weight:700;font-size:13px;color:var(--g);margin-bottom:6px}
+.result-card .row{font-size:12px;color:#475569;margin:2px 0;line-height:1.35}
+.result-card .row span{color:#94a3b8}
+.result-empty{color:var(--ok);font-weight:700;display:flex;align-items:center;min-height:48px}
+.ok{color:var(--ok);font-weight:700}
+.bad{color:var(--bad);font-weight:700}
+.note{color:#64748b;font-size:13px}
+h2{font-size:14px;margin:16px 0 8px;border-bottom:1px solid var(--line);padding-bottom:4px;color:#0f172a}
+.table-wrap{overflow:auto;margin:8px 0 16px;background:#fff;border:1px solid var(--line);border-radius:10px;max-height:min(70vh,640px)}
+table.excel{border-collapse:separate;border-spacing:0;width:max-content;min-width:100%;font-size:12px;background:#fff}
+table.excel th,table.excel td{border:1px solid var(--line);padding:6px 8px;text-align:left;vertical-align:top;white-space:nowrap;background:#fff}
+table.excel th{background:#ecf3ec;color:#0f172a;font-weight:700;position:sticky;top:0;z-index:2;box-shadow:0 1px 0 var(--line)}
+table.excel tbody tr:nth-child(even) td{background:#fafdfa}
+table.excel td.changed{background:#fff2cc;color:#0f172a;font-weight:600}
+table.excel td.same{color:#94a3b8;background:#fff}
+table.excel th.sub{background:#e2efe2;font-weight:600;font-size:12px;top:28px}
+table.excel td.tree-no{position:sticky;left:0;background:#fafdfa;z-index:1;font-weight:700;color:var(--g);box-shadow:2px 0 0 var(--line)}
+table.excel tbody tr:nth-child(even) td.tree-no{background:#f3f8f3}
+table.excel .corner{background:#ecf3ec;z-index:4}
+.excel-caption{font-size:12px;color:#64748b;margin:4px 0 8px}
+.section-actions{margin:8px 0 4px}
+.btn-sm{border:0;background:var(--g);color:#fff;font-weight:700;padding:8px 12px;border-radius:10px;cursor:pointer;font-size:13px}
+.btn-sm:disabled{background:#94a3b8;cursor:not-allowed}
+label.card-label{font-size:13px;font-weight:700;display:block;margin-bottom:6px}
+.hint{font-size:12px;color:#64748b;margin-top:4px}
 </style>
 </head>
 <body>
-<h1>Tree Inventory 自動檢查 / 年份對比</h1>
-<p class="note">單檔檢查只讀「新年 Excel」格（含 Health／Form 都是 Poor）。對比要舊年、新年兩格都有檔。</p>
-<div class="grid">
-  <div class="drop" id="dropA">
-    <div class="title">舊年 Excel</div>
-    <div>拖放或點擊選擇</div>
-    <div class="fname empty" id="nameA">尚未選擇</div>
+<header>
+  <h1>Tree Inventory 自動檢查 / 年份對比</h1>
+  <p>單檔檢查只讀「新年 Excel」格（含 Health／Form 都是 Poor）。對比要舊年、新年兩格都有檔。</p>
+</header>
+<div class="wrap">
+  <div class="grid">
+    <div class="card">
+      <label class="card-label">舊年 Excel</label>
+      <div class="drop" id="dropA">
+        <div class="title">拖放或點擊選擇</div>
+        <div class="fname empty" id="nameA">尚未選擇</div>
+      </div>
+      <div class="hint">可選；對比時必填</div>
+    </div>
+    <div class="card">
+      <label class="card-label">新年 Excel</label>
+      <div class="drop" id="dropB">
+        <div class="title">拖放或點擊選擇</div>
+        <div class="fname empty" id="nameB">尚未選擇</div>
+      </div>
+      <div class="hint">單檔檢查只讀此格</div>
+    </div>
   </div>
-  <div class="drop" id="dropB">
-    <div class="title">新年 Excel</div>
-    <div>拖放或點擊選擇</div>
-    <div class="fname empty" id="nameB">尚未選擇</div>
+  <input type="file" id="fileA" accept=".xlsx,.xls" hidden>
+  <input type="file" id="fileB" accept=".xlsx,.xls" hidden>
+  <div class="btns">
+    <button class="btn" id="btnCompare" disabled>開始對比</button>
+    <button class="btn btn2" id="btnSingle" disabled>單檔檢查（新年）</button>
   </div>
+  <div id="out"></div>
 </div>
-<input type="file" id="fileA" accept=".xlsx,.xls" hidden>
-<input type="file" id="fileB" accept=".xlsx,.xls" hidden>
-<div class="btns">
-  <button class="btn" id="btnCompare" disabled>開始對比</button>
-  <button class="btn btn2" id="btnSingle" disabled>單檔檢查（新年）</button>
-</div>
-<div id="out"></div>
 <script>
 const dropA = document.getElementById('dropA');
 const dropB = document.getElementById('dropB');
@@ -479,15 +394,15 @@ function renderSingle(trees, fileLabel) {
 
   return `
     <p class="note">檔案：${esc(fileLabel)}　共 ${trees.length} 棵</p>
-    <div class="cards">
-      <div class="card"><span class="label">總樹數</span><b>${trees.length}</b></div>
-      <div class="card"><span class="label">有效樹</span><b>${active.length}</b></div>
-      <div class="card"><span class="label">Removed</span><b>${removed.length}</b></div>
-      <div class="card"><span class="label">DBH ≥ 95</span><b>${dbh95.length}</b></div>
-      <div class="card"><span class="label">Yellow</span><b>${yN}</b></div>
-      <div class="card"><span class="label">Orange</span><b>${oN}</b></div>
-      <div class="card"><span class="label">Large (H≥9 / DBH≥500)</span><b>${large.length}</b></div>
-      <div class="card"><span class="label">Health & Form Poor</span><b>${hfPoor.length}</b></div>
+    <div class="kpis">
+      <div class="kpi"><b>${trees.length}</b><span>總樹數</span></div>
+      <div class="kpi"><b>${active.length}</b><span>有效樹</span></div>
+      <div class="kpi"><b>${removed.length}</b><span>Removed</span></div>
+      <div class="kpi"><b>${dbh95.length}</b><span>DBH ≥ 95</span></div>
+      <div class="kpi"><b>${yN}</b><span>Yellow</span></div>
+      <div class="kpi"><b>${oN}</b><span>Orange</span></div>
+      <div class="kpi"><b>${large.length}</b><span>Large (H≥9 / DBH≥500)</span></div>
+      <div class="kpi"><b>${hfPoor.length}</b><span>Health & Form Poor</span></div>
     </div>
     <h2>1. Large tree 未標 Yellow / Orange　${badge(miss.length)}</h2>
     ${cards(miss, ['no', 'sp', 'h', 'agg', 'triage', 'status'])}
@@ -623,13 +538,13 @@ function renderCompare(treesA, treesB, nameOld, nameNew) {
 
   return `
     <p class="note">對比：舊年「${esc(nameOld)}」↔ 新年「${esc(nameNew)}」</p>
-    <div class="cards">
-      <div class="card"><span class="label">舊年樹數</span><b>${treesA.length}</b></div>
-      <div class="card"><span class="label">新年樹數</span><b>${treesB.length}</b></div>
-      <div class="card"><span class="label">只在舊年</span><b>${onlyA.length}</b></div>
-      <div class="card"><span class="label">只在新年</span><b>${onlyB.length}</b></div>
-      <div class="card"><span class="label">有變動</span><b>${changed.length}</b></div>
-      <div class="card"><span class="label">雙 Poor（新年）</span><b>${hfPoor.length}</b></div>
+    <div class="kpis">
+      <div class="kpi"><b>${treesA.length}</b><span>舊年樹數</span></div>
+      <div class="kpi"><b>${treesB.length}</b><span>新年樹數</span></div>
+      <div class="kpi"><b>${onlyA.length}</b><span>只在舊年</span></div>
+      <div class="kpi"><b>${onlyB.length}</b><span>只在新年</span></div>
+      <div class="kpi"><b>${changed.length}</b><span>有變動</span></div>
+      <div class="kpi"><b>${hfPoor.length}</b><span>雙 Poor（新年）</span></div>
     </div>
     <h2>1. 只在舊年　${badge(onlyA.length, false)}</h2>
     ${cards(onlyA, ['no', 'sp', 'health', 'form', 'triage', 'overall'], '無（舊年獨有）')}
