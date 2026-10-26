@@ -14,11 +14,41 @@
     background: #f4f6f5;
   }
   h1 { font-size: 22px; margin-top: 0; }
-  #drop {
-    border: 2px dashed #1F4E79; border-radius: 10px; padding: 36px;
-    text-align: center; color: #1F4E79; background: #f4f8fb; cursor: pointer;
+  .grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin: 12px 0;
   }
-  #drop.over { background: #e3eef8; }
+  @media (max-width: 800px) { .grid { grid-template-columns: 1fr; } }
+  .drop {
+    border: 2px dashed #1F4E79;
+    border-radius: 12px;
+    padding: 28px 16px;
+    text-align: center;
+    color: #1F4E79;
+    background: #f4f8fb;
+    cursor: pointer;
+    min-height: 120px;
+    box-sizing: border-box;
+  }
+  .drop.over { background: #e3eef8; border-color: #0d3a5c; }
+  .drop .title { font-weight: 700; font-size: 15px; margin-bottom: 6px; }
+  .drop .fname { font-size: 13px; color: #555; margin-top: 10px; word-break: break-all; }
+  .drop .fname.empty { color: #999; }
+  .btns { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 4px; }
+  .btn {
+    border: 0;
+    background: #1F4E79;
+    color: #fff;
+    font-weight: 700;
+    padding: 10px 16px;
+    border-radius: 10px;
+    cursor: pointer;
+    font-size: 14px;
+  }
+  .btn:disabled { background: #a0aec0; cursor: not-allowed; }
+  .btn2 { background: #e2e8f0; color: #334155; }
   .cards {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
@@ -82,18 +112,39 @@
 </style>
 </head>
 <body>
-<h1>Tree Inventory 自動檢查</h1>
-<div id="drop">把 export Excel 拖到這裡，或點擊選擇檔案<br><span class="note">檢查 DBH≥500 / 高度≥9、Triage、Status、Remedial、Removed 是否全 0；只列出 Overall Poor</span></div>
-<input type="file" id="file" accept=".xlsx,.xls" hidden>
+<h1>Tree Inventory 自動檢查 / 年份對比</h1>
+<p class="note">可放一份做單檔檢查（含 Health／Form 都是 Poor），或放兩份 Excel 對比兩年差異。</p>
+<div class="grid">
+  <div class="drop" id="dropA">
+    <div class="title">舊年 Excel</div>
+    <div>拖放或點擊選擇</div>
+    <div class="fname empty" id="nameA">尚未選擇</div>
+  </div>
+  <div class="drop" id="dropB">
+    <div class="title">新年 Excel</div>
+    <div>拖放或點擊選擇</div>
+    <div class="fname empty" id="nameB">尚未選擇</div>
+  </div>
+</div>
+<input type="file" id="fileA" accept=".xlsx,.xls" hidden>
+<input type="file" id="fileB" accept=".xlsx,.xls" hidden>
+<div class="btns">
+  <button class="btn" id="btnCompare" disabled>開始對比</button>
+  <button class="btn btn2" id="btnSingle" disabled>單檔檢查</button>
+</div>
 <div id="out"></div>
 <script>
-const drop = document.getElementById('drop');
-const fileInput = document.getElementById('file');
-drop.onclick = () => fileInput.click();
-drop.ondragover = e => { e.preventDefault(); drop.classList.add('over'); };
-drop.ondragleave = () => drop.classList.remove('over');
-drop.ondrop = e => { e.preventDefault(); drop.classList.remove('over'); if (e.dataTransfer.files[0]) run(e.dataTransfer.files[0]); };
-fileInput.onchange = () => { if (fileInput.files[0]) run(fileInput.files[0]); };
+const dropA = document.getElementById('dropA');
+const dropB = document.getElementById('dropB');
+const fileA = document.getElementById('fileA');
+const fileB = document.getElementById('fileB');
+const nameA = document.getElementById('nameA');
+const nameB = document.getElementById('nameB');
+const btnCompare = document.getElementById('btnCompare');
+const btnSingle = document.getElementById('btnSingle');
+const out = document.getElementById('out');
+
+let bufA = null, bufB = null, fileNameA = '', fileNameB = '';
 
 function num(v) {
   const n = parseFloat(String(v ?? '').replace(/,/g, ''));
@@ -101,6 +152,7 @@ function num(v) {
 }
 function s(v) { return String(v ?? '').trim(); }
 function esc(v) { return s(v).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+function normNo(v) { return s(v).toUpperCase(); }
 
 const FIELD_LABELS = {
   no: 'Tree No',
@@ -114,101 +166,411 @@ const FIELD_LABELS = {
   spread: 'Spread',
   trunk: 'Trunk',
   overall: 'Overall',
+  health: 'Health',
+  form: 'Form',
+  reason: 'Reason',
 };
 
-function run(file) {
+function updateButtons() {
+  const hasA = !!bufA;
+  const hasB = !!bufB;
+  btnCompare.disabled = !(hasA && hasB);
+  btnSingle.disabled = !(hasA || hasB);
+}
+
+function wireDrop(dropEl, inputEl, which) {
+  dropEl.onclick = () => inputEl.click();
+  dropEl.ondragover = e => { e.preventDefault(); dropEl.classList.add('over'); };
+  dropEl.ondragleave = () => dropEl.classList.remove('over');
+  dropEl.ondrop = e => {
+    e.preventDefault();
+    dropEl.classList.remove('over');
+    if (e.dataTransfer.files[0]) loadFile(e.dataTransfer.files[0], which);
+  };
+  inputEl.onchange = () => { if (inputEl.files[0]) loadFile(inputEl.files[0], which); };
+}
+
+function loadFile(file, which) {
   const reader = new FileReader();
   reader.onload = e => {
-    const wb = XLSX.read(e.target.result, { type: 'array' });
-    const sheet = wb.Sheets[wb.SheetNames[0]];
-    const raw = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
-    let headerRow = 0;
-    for (let i = 0; i < Math.min(raw.length, 20); i++) {
-      const joined = raw[i].map(x => String(x).toLowerCase()).join(' ');
-      if (joined.includes('tree no') && joined.includes('triage')) { headerRow = i; break; }
+    if (which === 'A') {
+      bufA = e.target.result;
+      fileNameA = file.name;
+      nameA.textContent = file.name;
+      nameA.classList.remove('empty');
+    } else {
+      bufB = e.target.result;
+      fileNameB = file.name;
+      nameB.textContent = file.name;
+      nameB.classList.remove('empty');
     }
+    updateButtons();
+    // Auto single-check when only one file is present
+    if ((bufA && !bufB) || (!bufA && bufB)) {
+      runSingle();
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+wireDrop(dropA, fileA, 'A');
+wireDrop(dropB, fileB, 'B');
+btnCompare.onclick = () => runCompare();
+btnSingle.onclick = () => runSingle();
+
+function findCol(headers, pred) {
+  for (let i = 0; i < headers.length; i++) {
+    if (pred(headers[i], i)) return i;
+  }
+  return -1;
+}
+
+function pickHealthForm(headers) {
+  const healthIdx = findCol(headers, h => {
+    const t = h.toLowerCase();
+    if (!/health/i.test(t)) return false;
+    if (/form\s*2/i.test(t)) return false;
+    return true;
+  });
+  let formIdx = findCol(headers, h => {
+    const t = h.toLowerCase();
+    if (/form\s*2/i.test(t)) return false;
+    if (/remedial/i.test(t)) return false;
+    if (/^\s*form\s*$/i.test(h) || /form\s*condition/i.test(t)) return true;
+    return false;
+  });
+  if (formIdx < 0) {
+    formIdx = findCol(headers, h => {
+      const t = h.toLowerCase();
+      if (/form\s*2/i.test(t)) return false;
+      if (/remedial/i.test(t)) return false;
+      return /structural\s*condition/i.test(t) || /\bform\b/i.test(t);
+    });
+  }
+  return { healthIdx, formIdx };
+}
+
+function getHeaderVal(rowObj, names) {
+  for (const n of names) {
+    if (rowObj[n] !== undefined && s(rowObj[n]) !== '') return rowObj[n];
+  }
+  // case-insensitive / partial
+  const keys = Object.keys(rowObj);
+  for (const want of names) {
+    const w = want.toLowerCase();
+    const k = keys.find(x => x.toLowerCase() === w || x.toLowerCase().startsWith(w));
+    if (k) return rowObj[k];
+  }
+  return '';
+}
+
+function isInventoryTreeNo(no) {
+  return /^[A-Za-z]{1,6}-?T\d+/i.test(no) || /^YO-/i.test(no);
+}
+function isAssessmentTreeNo(no) {
+  return /^[A-Za-z]{1,6}\d+/i.test(no);
+}
+
+/** Parse Excel arrayBuffer → tree objects keyed fields */
+function parseTrees(arrayBuffer) {
+  const wb = XLSX.read(arrayBuffer, { type: 'array' });
+  const sheet = wb.Sheets[wb.SheetNames[0]];
+  const raw = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+
+  // --- Primary: inventory export (tree no + triage) ---
+  let headerRow = -1;
+  for (let i = 0; i < Math.min(raw.length, 30); i++) {
+    const joined = raw[i].map(x => String(x).toLowerCase()).join(' ');
+    if (joined.includes('tree no') && joined.includes('triage')) { headerRow = i; break; }
+  }
+
+  if (headerRow >= 0) {
     const headers = raw[headerRow].map(x => s(x));
+    const { healthIdx, formIdx } = pickHealthForm(headers);
     const rows = raw.slice(headerRow + 1).map(r => {
       const o = {};
       headers.forEach((h, i) => o[h] = r[i]);
       return o;
-    }).filter(r => /^[A-Za-z]{1,6}-?T\d+/i.test(s(r['Tree No'])) || /^YO-/i.test(s(r['Tree No'])));
+    }).filter(r => isInventoryTreeNo(s(r['Tree No'])));
 
-    const trees = rows.map(r => ({
-      no: s(r['Tree No']),
-      sp: s(r['Tree Species']),
-      h: num(r['Height (m)']),
-      spread: num(r['Crown Spread (m)']),
-      dbh: [num(r['DBH1 (mm)']), num(r['DBH2 (mm)']), num(r['DBH3 (mm)']), num(r['DBH4 (mm)']), num(r['DBH5 (mm)'])],
-      agg: num(r['Aggregated DBH (mm)']),
-      trunk: num(r['Trunk No.']),
-      reason: s(r['Tree not inspected Reason']),
-      triage: s(r['Triage Colour']),
-      status: s(r['Tree Status']),
-      overall: s(r['Overall Conditions']),
-      rem: s(r['Remedial Action']),
-      others: s(r['Remedial Action (Others)']),
-    }));
+    return rows.map(r => {
+      const arr = headers.map((_, i) => r[headers[i]]);
+      return {
+        no: s(r['Tree No']),
+        sp: s(r['Tree Species'] || r['Species'] || ''),
+        h: num(r['Height (m)'] ?? r['Height']),
+        spread: num(r['Crown Spread (m)'] ?? r['Spread (m)'] ?? r['Spread']),
+        dbh: [num(r['DBH1 (mm)']), num(r['DBH2 (mm)']), num(r['DBH3 (mm)']), num(r['DBH4 (mm)']), num(r['DBH5 (mm)'])],
+        agg: num(r['Aggregated DBH (mm)'] ?? r['DBH (mm)'] ?? r['DBH']),
+        trunk: num(r['Trunk No.']),
+        reason: s(r['Tree not inspected Reason']),
+        triage: s(r['Triage Colour']),
+        status: s(r['Tree Status']),
+        overall: s(r['Overall Conditions']),
+        rem: s(r['Remedial Action']),
+        others: s(r['Remedial Action (Others)']),
+        health: healthIdx >= 0 ? s(arr[healthIdx]) : s(getHeaderVal(r, ['Health Condition', 'Health Conditions', 'Health'])),
+        form: formIdx >= 0 ? s(arr[formIdx]) : s(getHeaderVal(r, ['Form Condition', 'Form Conditions', 'Form', 'Structural Condition'])),
+      };
+    });
+  }
 
-    const removed = trees.filter(t => /removed/i.test(t.reason));
-    const active = trees.filter(t => !/removed/i.test(t.reason));
-    const isLarge = t => t.agg >= 500 || t.h >= 9;
-    const large = active.filter(isLarge);
-    const miss = large.filter(t => !['Yellow','Orange'].includes(t.triage));
-    const yBad = trees.filter(t => t.triage === 'Yellow' && !/Large Tree/i.test(t.status));
-    const oBad = trees.filter(t => t.triage === 'Orange' && !/Confined/i.test(t.status));
-    const yo = trees.filter(t => ['Yellow','Orange'].includes(t.triage));
-    const badRem = yo.filter(t => !['Form 2 Assessment','Others'].includes(t.rem));
-    const badOth = yo.filter(t => t.rem === 'Others' && !/reinspection/i.test(t.others));
-    const poor = trees.filter(t => /^poor$/i.test(t.overall));
-    const remBad = removed.filter(t => !(t.h===0 && t.spread===0 && t.dbh.every(x=>x===0) && t.agg===0 && t.trunk===0));
-    const dbh95 = active.filter(t => t.agg >= 95);
-    const yN = trees.filter(t => t.triage === 'Yellow').length;
-    const oN = trees.filter(t => t.triage === 'Orange').length;
+  // --- Fallback: assessment schedule (Health Condition / Structural Condition) ---
+  let assessHeader = -1;
+  for (let i = 0; i < Math.min(raw.length, 40); i++) {
+    const joined = raw[i].map(x => String(x).toLowerCase()).join(' | ');
+    if (/tree\s*no/i.test(joined) && /health\s*condition/i.test(joined)) {
+      assessHeader = i;
+      break;
+    }
+  }
+  if (assessHeader < 0) return [];
 
-    const badge = (n, okZero=true) => `<span class="${(okZero ? n===0 : n>0) ? 'ok' : 'bad'}">${n}</span>`;
-    const cards = (list, cols, empty='無') => {
-      if (!list.length) {
-        return `<div class="result-grid"><div class="result-card result-empty">${esc(empty)}</div></div>`;
+  const headers = raw[assessHeader].map(x => s(x).replace(/\s+/g, ' '));
+  // Merge sub-header row if present (row+1 often has Height/Spread/DBH labels)
+  const sub = (raw[assessHeader + 1] || []).map(x => s(x));
+  const effective = headers.map((h, i) => {
+    if (h) return h;
+    return sub[i] || '';
+  });
+  // Prefer parent labels for Health/Structural even if blank in parent under Tree Size
+  for (let i = 0; i < headers.length; i++) {
+    if (headers[i]) effective[i] = headers[i];
+  }
+
+  const { healthIdx, formIdx } = pickHealthForm(effective.length ? effective : headers);
+  // Also try original headers for Health Condition / Structural Condition
+  let hIdx = healthIdx;
+  let fIdx = formIdx;
+  if (hIdx < 0) hIdx = findCol(headers, h => /health\s*condition/i.test(h));
+  if (fIdx < 0) fIdx = findCol(headers, h => /structural\s*condition/i.test(h) || (/^\s*form\s*$/i.test(h)));
+
+  const treeNoIdx = findCol(headers, h => /tree\s*no/i.test(h));
+  const speciesIdx = findCol(headers, h => /^species$/i.test(h) || /scientific\s*name/i.test(h));
+  // Height/Spread/DBH often on sub-row
+  let heightIdx = findCol(effective, h => /height/i.test(h));
+  if (heightIdx < 0) heightIdx = findCol(sub, h => /height/i.test(h));
+  let spreadIdx = findCol(effective, h => /spread/i.test(h));
+  if (spreadIdx < 0) spreadIdx = findCol(sub, h => /spread/i.test(h));
+  let dbhIdx = findCol(effective, h => /\bdbh\b/i.test(h));
+  if (dbhIdx < 0) dbhIdx = findCol(sub, h => /\bdbh\b/i.test(h));
+  // Scientific name often col after Tree No blank col
+  let sciIdx = findCol(sub, h => /scientific/i.test(h));
+  if (sciIdx < 0 && speciesIdx >= 0) sciIdx = speciesIdx;
+
+  const dataStart = assessHeader + 1;
+  // skip blank / subheader rows until we hit a tree no
+  const trees = [];
+  for (let r = dataStart; r < raw.length; r++) {
+    const row = raw[r];
+    const no = s(row[treeNoIdx >= 0 ? treeNoIdx : 0]);
+    if (!no) continue;
+    if (!isAssessmentTreeNo(no) && !isInventoryTreeNo(no)) continue;
+    // skip legend-like rows
+    if (/legend|dead tree|venue|prepared/i.test(no)) continue;
+    const sp = s(row[sciIdx >= 0 ? sciIdx : (speciesIdx >= 0 ? speciesIdx : 2)]);
+    const h = heightIdx >= 0 ? num(row[heightIdx]) : 0;
+    const spread = spreadIdx >= 0 ? num(row[spreadIdx]) : 0;
+    const dbhVal = dbhIdx >= 0 ? num(row[dbhIdx]) : 0;
+    trees.push({
+      no,
+      sp,
+      h,
+      spread,
+      dbh: [dbhVal, 0, 0, 0, 0],
+      agg: dbhVal,
+      trunk: 0,
+      reason: '',
+      triage: '',
+      status: '',
+      overall: '',
+      rem: '',
+      others: '',
+      health: hIdx >= 0 ? s(row[hIdx]) : '',
+      form: fIdx >= 0 ? s(row[fIdx]) : '',
+    });
+  }
+  return trees;
+}
+
+function badge(n, okZero = true) {
+  return `<span class="${(okZero ? n === 0 : n > 0) ? 'ok' : 'bad'}">${n}</span>`;
+}
+
+function cards(list, cols, empty = '無') {
+  if (!list.length) {
+    return `<div class="result-grid"><div class="result-card result-empty">${esc(empty)}</div></div>`;
+  }
+  const fieldCols = cols.filter(c => c !== 'no');
+  return `<div class="result-grid">${list.map(t => {
+    const rowsHtml = fieldCols.map(c =>
+      `<div class="row"><span>${FIELD_LABELS[c] || c}：</span>${esc(t[c])}</div>`
+    ).join('');
+    return `<div class="result-card"><div class="tn">${esc(t.no)}</div>${rowsHtml}</div>`;
+  }).join('')}</div>`;
+}
+
+function bothPoor(trees) {
+  return trees.filter(t => /^poor$/i.test(t.health) && /^poor$/i.test(t.form));
+}
+
+function renderSingle(trees, fileLabel) {
+  const removed = trees.filter(t => /removed/i.test(t.reason));
+  const active = trees.filter(t => !/removed/i.test(t.reason));
+  const isLarge = t => t.agg >= 500 || t.h >= 9;
+  const large = active.filter(isLarge);
+  const miss = large.filter(t => !['Yellow', 'Orange'].includes(t.triage));
+  const yBad = trees.filter(t => t.triage === 'Yellow' && !/Large Tree/i.test(t.status));
+  const oBad = trees.filter(t => t.triage === 'Orange' && !/Confined/i.test(t.status));
+  const yo = trees.filter(t => ['Yellow', 'Orange'].includes(t.triage));
+  const badRem = yo.filter(t => !['Form 2 Assessment', 'Others'].includes(t.rem));
+  const badOth = yo.filter(t => t.rem === 'Others' && !/reinspection/i.test(t.others));
+  const poor = trees.filter(t => /^poor$/i.test(t.overall));
+  const remBad = removed.filter(t => !(t.h === 0 && t.spread === 0 && t.dbh.every(x => x === 0) && t.agg === 0 && t.trunk === 0));
+  const dbh95 = active.filter(t => t.agg >= 95);
+  const yN = trees.filter(t => t.triage === 'Yellow').length;
+  const oN = trees.filter(t => t.triage === 'Orange').length;
+  const hfPoor = bothPoor(trees);
+
+  return `
+    <p class="note">檔案：${esc(fileLabel)}　共 ${trees.length} 棵</p>
+    <div class="cards">
+      <div class="card"><span class="label">總樹數</span><b>${trees.length}</b></div>
+      <div class="card"><span class="label">有效樹</span><b>${active.length}</b></div>
+      <div class="card"><span class="label">Removed</span><b>${removed.length}</b></div>
+      <div class="card"><span class="label">DBH ≥ 95</span><b>${dbh95.length}</b></div>
+      <div class="card"><span class="label">Yellow</span><b>${yN}</b></div>
+      <div class="card"><span class="label">Orange</span><b>${oN}</b></div>
+      <div class="card"><span class="label">Large (H≥9 / DBH≥500)</span><b>${large.length}</b></div>
+      <div class="card"><span class="label">Health & Form Poor</span><b>${hfPoor.length}</b></div>
+    </div>
+    <h2>1. Large tree 未標 Yellow / Orange　${badge(miss.length)}</h2>
+    ${cards(miss, ['no', 'sp', 'h', 'agg', 'triage', 'status'])}
+    <h2>2. Yellow Status 不是 Large Tree　${badge(yBad.length)}</h2>
+    ${cards(yBad, ['no', 'sp', 'status'])}
+    <h2>3. Orange Status 不是 Tree in Confined Site　${badge(oBad.length)}</h2>
+    ${cards(oBad, ['no', 'sp', 'status'])}
+    <h2>4. Yellow/Orange Remedial 不是 Form 2 / Others　${badge(badRem.length)}</h2>
+    ${cards(badRem, ['no', 'triage', 'rem'])}
+    <h2>5. Others 不是 Reinspection within 12 months　${badge(badOth.length)}</h2>
+    ${cards(badOth, ['no', 'others'])}
+    <h2>6. Removed 量度不是全 0　${badge(remBad.length)}</h2>
+    <p class="note">Removed 共 ${removed.length} 棵，只檢查 Height / Spread / DBH1–5 / Agg. DBH / Trunk No. 是否全為 0，不列出清單。</p>
+    ${cards(remBad, ['no', 'h', 'spread', 'agg', 'trunk'])}
+    <h2>7. Overall Conditions = Poor　${badge(poor.length, false)}</h2>
+    ${cards(poor, ['no', 'sp', 'overall', 'triage', 'h', 'agg'], '無 Overall Poor')}
+    <h2>8. Health 與 Form 都是 Poor　${badge(hfPoor.length, false)}</h2>
+    ${cards(hfPoor, ['no', 'sp', 'health', 'form', 'triage', 'overall'], '無 Health & Form 都是 Poor')}
+  `;
+}
+
+function valEq(a, b) {
+  // numeric-ish compare when both parse as numbers
+  const na = parseFloat(String(a ?? '').replace(/,/g, ''));
+  const nb = parseFloat(String(b ?? '').replace(/,/g, ''));
+  if (!isNaN(na) && !isNaN(nb) && String(a).trim() !== '' && String(b).trim() !== '') {
+    return na === nb;
+  }
+  return s(a) === s(b);
+}
+
+const COMPARE_FIELDS = [
+  { key: 'sp', label: 'Species' },
+  { key: 'h', label: 'Height' },
+  { key: 'agg', label: 'Agg. DBH' },
+  { key: 'triage', label: 'Triage' },
+  { key: 'status', label: 'Status' },
+  { key: 'overall', label: 'Overall' },
+  { key: 'health', label: 'Health' },
+  { key: 'form', label: 'Form' },
+  { key: 'rem', label: 'Remedial' },
+  { key: 'reason', label: 'Reason' },
+];
+
+function renderCompare(treesA, treesB, nameOld, nameNew) {
+  const mapA = new Map();
+  const mapB = new Map();
+  treesA.forEach(t => mapA.set(normNo(t.no), t));
+  treesB.forEach(t => mapB.set(normNo(t.no), t));
+
+  const onlyA = [];
+  const onlyB = [];
+  const changed = [];
+
+  for (const [k, t] of mapA) {
+    if (!mapB.has(k)) onlyA.push(t);
+  }
+  for (const [k, t] of mapB) {
+    if (!mapA.has(k)) onlyB.push(t);
+  }
+  for (const [k, tB] of mapB) {
+    const tA = mapA.get(k);
+    if (!tA) continue;
+    const diffs = [];
+    for (const f of COMPARE_FIELDS) {
+      if (!valEq(tA[f.key], tB[f.key])) {
+        diffs.push({ label: f.label, old: tA[f.key], neu: tB[f.key] });
       }
-      const fieldCols = cols.filter(c => c !== 'no');
-      return `<div class="result-grid">${list.map(t => {
-        const rowsHtml = fieldCols.map(c =>
-          `<div class="row"><span>${FIELD_LABELS[c] || c}：</span>${esc(t[c])}</div>`
-        ).join('');
-        return `<div class="result-card"><div class="tn">${esc(t.no)}</div>${rowsHtml}</div>`;
-      }).join('')}</div>`;
-    };
+    }
+    if (diffs.length) changed.push({ no: tB.no, diffs, tA, tB });
+  }
 
-    document.getElementById('out').innerHTML = `
-      <p class="note">檔案：${esc(file.name)}　共 ${trees.length} 棵</p>
-      <div class="cards">
-        <div class="card"><span class="label">總樹數</span><b>${trees.length}</b></div>
-        <div class="card"><span class="label">有效樹</span><b>${active.length}</b></div>
-        <div class="card"><span class="label">Removed</span><b>${removed.length}</b></div>
-        <div class="card"><span class="label">DBH ≥ 95</span><b>${dbh95.length}</b></div>
-        <div class="card"><span class="label">Yellow</span><b>${yN}</b></div>
-        <div class="card"><span class="label">Orange</span><b>${oN}</b></div>
-        <div class="card"><span class="label">Large (H≥9 / DBH≥500)</span><b>${large.length}</b></div>
-      </div>
-      <h2>1. Large tree 未標 Yellow / Orange　${badge(miss.length)}</h2>
-      ${cards(miss, ['no','sp','h','agg','triage','status'])}
-      <h2>2. Yellow Status 不是 Large Tree　${badge(yBad.length)}</h2>
-      ${cards(yBad, ['no','sp','status'])}
-      <h2>3. Orange Status 不是 Tree in Confined Site　${badge(oBad.length)}</h2>
-      ${cards(oBad, ['no','sp','status'])}
-      <h2>4. Yellow/Orange Remedial 不是 Form 2 / Others　${badge(badRem.length)}</h2>
-      ${cards(badRem, ['no','triage','rem'])}
-      <h2>5. Others 不是 Reinspection within 12 months　${badge(badOth.length)}</h2>
-      ${cards(badOth, ['no','others'])}
-      <h2>6. Removed 量度不是全 0　${badge(remBad.length)}</h2>
-      <p class="note">Removed 共 ${removed.length} 棵，只檢查 Height / Spread / DBH1–5 / Agg. DBH / Trunk No. 是否全為 0，不列出清單。</p>
-      ${cards(remBad, ['no','h','spread','agg','trunk'])}
-      <h2>7. Overall Conditions = Poor　${badge(poor.length, false)}</h2>
-      ${cards(poor, ['no','sp','overall','triage','h','agg'], '無 Overall Poor')}
-    `;
+  const hfPoor = bothPoor(treesB);
+
+  const changeCards = () => {
+    if (!changed.length) {
+      return `<div class="result-grid"><div class="result-card result-empty">無欄位變動</div></div>`;
+    }
+    return `<div class="result-grid">${changed.map(c => {
+      const rows = c.diffs.map(d =>
+        `<div class="row"><span>${esc(d.label)}：</span>舊 ${esc(d.old) || '（空）'} → 新 ${esc(d.neu) || '（空）'}</div>`
+      ).join('');
+      return `<div class="result-card"><div class="tn">${esc(c.no)}</div>${rows}</div>`;
+    }).join('')}</div>`;
   };
-  reader.readAsArrayBuffer(file);
+
+  return `
+    <p class="note">對比：舊年「${esc(nameOld)}」↔ 新年「${esc(nameNew)}」</p>
+    <div class="cards">
+      <div class="card"><span class="label">舊年樹數</span><b>${treesA.length}</b></div>
+      <div class="card"><span class="label">新年樹數</span><b>${treesB.length}</b></div>
+      <div class="card"><span class="label">只在舊年</span><b>${onlyA.length}</b></div>
+      <div class="card"><span class="label">只在新年</span><b>${onlyB.length}</b></div>
+      <div class="card"><span class="label">有變動</span><b>${changed.length}</b></div>
+      <div class="card"><span class="label">雙 Poor（新年）</span><b>${hfPoor.length}</b></div>
+    </div>
+    <h2>1. 只在舊年　${badge(onlyA.length, false)}</h2>
+    ${cards(onlyA, ['no', 'sp', 'health', 'form', 'triage', 'overall'], '無（舊年獨有）')}
+    <h2>2. 只在新年　${badge(onlyB.length, false)}</h2>
+    ${cards(onlyB, ['no', 'sp', 'health', 'form', 'triage', 'overall'], '無（新年獨有）')}
+    <h2>3. 欄位有變　${badge(changed.length, false)}</h2>
+    ${changeCards()}
+    <h2>4. Health 與 Form 都是 Poor（新年）　${badge(hfPoor.length, false)}</h2>
+    ${cards(hfPoor, ['no', 'sp', 'health', 'form', 'triage', 'overall'], '無 Health & Form 都是 Poor')}
+  `;
+}
+
+function runSingle() {
+  const buf = bufB || bufA;
+  const name = bufB ? fileNameB : fileNameA;
+  if (!buf) return;
+  try {
+    const trees = parseTrees(buf);
+    out.innerHTML = renderSingle(trees, name);
+  } catch (err) {
+    out.innerHTML = `<p class="bad">讀取失敗：${esc(err.message || err)}</p>`;
+  }
+}
+
+function runCompare() {
+  if (!bufA || !bufB) return;
+  try {
+    const treesA = parseTrees(bufA);
+    const treesB = parseTrees(bufB);
+    out.innerHTML = renderCompare(treesA, treesB, fileNameA, fileNameB);
+  } catch (err) {
+    out.innerHTML = `<p class="bad">對比失敗：${esc(err.message || err)}</p>`;
+  }
 }
 </script>
 </body>

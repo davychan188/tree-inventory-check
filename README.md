@@ -1,18 +1,13 @@
-# Tree Inventory 自動檢查
+# Tree Inventory Auto Check
 
-把 Tree Inventory 的 Excel export 拖入網頁，自動檢查：
+瀏覽器端工具：上傳 Tree Inventory Excel，自動檢查 triage／status／remedial／removed，並列出 Overall Poor、Health 與 Form 都是 Poor。
 
-- Large tree（DBH≥500 / 高度≥9）是否已標 Yellow / Orange
-- Yellow / Orange 的 Status、Remedial
-- Removed 量度是否全為 0
-- Overall Conditions = Poor
+亦可同時上傳舊年／新年兩份 Excel，對比只在舊年、只在新年、欄位有變，以及新年雙 Poor。
 
 ## 使用
 
-線上版：https://davychan188.github.io/tree-inventory-check/
+開 [GitHub Pages](https://davychan188.github.io/tree-inventory-check/)，拖放 `.xlsx` / `.xls`。資料唔會上傳伺服器。
 
-或直接開啟本 repo 的 `index.html`（需可連線 CDN 以載入 xlsx 函式庫）。
-
-## 檔案
-
-- `index.html` — 單一頁面工具（拖放 Excel → 顯示摘要卡與檢查結果）
+支援：
+- Inventory export（含 Tree No + Triage）
+- Assessment schedule（含 Health Condition / Structural Condition）
