@@ -463,6 +463,8 @@ function renderSingle(trees, fileLabel) {
   const isLarge = t => t.agg >= 500 || t.h >= 9;
   const large = active.filter(isLarge);
   const miss = large.filter(t => !['Yellow', 'Orange'].includes(t.triage));
+  // 高度 <9 且 Agg.DBH <500，但 Triage 為 Yellow / Orange / Red
+  const smallYor = active.filter(t => t.h < 9 && t.agg < 500 && /^(Yellow|Orange|Red)$/i.test(t.triage));
   const yBad = trees.filter(t => t.triage === 'Yellow' && !/Large Tree/i.test(t.status));
   const oBad = trees.filter(t => t.triage === 'Orange' && !/Confined/i.test(t.status));
   const yo = trees.filter(t => ['Yellow', 'Orange'].includes(t.triage));
@@ -489,6 +491,8 @@ function renderSingle(trees, fileLabel) {
     </div>
     <h2>1. Large tree 未標 Yellow / Orange　${badge(miss.length)}</h2>
     ${cards(miss, ['no', 'sp', 'h', 'agg', 'triage', 'status'])}
+    <h2>1b. 非 Large（H&lt;9 且 DBH&lt;500）但 Triage 為 Yellow／Orange／Red　${badge(smallYor.length)}</h2>
+    ${cards(smallYor, ['no', 'sp', 'h', 'agg', 'triage', 'status'], '無')}
     <h2>2. Yellow Status 不是 Large Tree　${badge(yBad.length)}</h2>
     ${cards(yBad, ['no', 'sp', 'status'])}
     <h2>3. Orange Status 不是 Tree in Confined Site　${badge(oBad.length)}</h2>
