@@ -109,11 +109,49 @@
   .bad { color: #b00020; font-weight: bold; }
   .note { color: #555; font-size: 13px; }
   h2 { font-size: 16px; margin-top: 28px; border-bottom: 1px solid #ccc; padding-bottom: 4px; }
+  .table-wrap { overflow-x: auto; margin: 8px 0 18px; background: #fff; border: 1px solid #d8dde3; border-radius: 8px; }
+  table.excel {
+    border-collapse: collapse;
+    width: 100%;
+    min-width: 900px;
+    font-size: 13px;
+    background: #fff;
+  }
+  table.excel th, table.excel td {
+    border: 1px solid #c5cdd6;
+    padding: 6px 8px;
+    text-align: left;
+    vertical-align: top;
+    white-space: nowrap;
+  }
+  table.excel th {
+    background: #1F4E79;
+    color: #fff;
+    font-weight: 700;
+    position: sticky;
+    top: 0;
+    z-index: 1;
+  }
+  table.excel tbody tr:nth-child(even) { background: #f3f6f9; }
+  table.excel td.changed { color: #b00020; font-weight: 600; }
+  table.excel td.same { color: #999; }
+  .section-actions { margin: 8px 0 4px; }
+  .btn-sm {
+    border: 0;
+    background: #1F4E79;
+    color: #fff;
+    font-weight: 700;
+    padding: 8px 14px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 13px;
+  }
+  .btn-sm:disabled { background: #a0aec0; cursor: not-allowed; }
 </style>
 </head>
 <body>
 <h1>Tree Inventory 自動檢查 / 年份對比</h1>
-<p class="note">可放一份做單檔檢查（含 Health／Form 都是 Poor），或放兩份 Excel 對比兩年差異。</p>
+<p class="note">單檔檢查只讀「新年 Excel」格（含 Health／Form 都是 Poor）。對比要舊年、新年兩格都有檔。</p>
 <div class="grid">
   <div class="drop" id="dropA">
     <div class="title">舊年 Excel</div>
@@ -130,7 +168,7 @@
 <input type="file" id="fileB" accept=".xlsx,.xls" hidden>
 <div class="btns">
   <button class="btn" id="btnCompare" disabled>開始對比</button>
-  <button class="btn btn2" id="btnSingle" disabled>單檔檢查</button>
+  <button class="btn btn2" id="btnSingle" disabled>單檔檢查（新年）</button>
 </div>
 <div id="out"></div>
 <script>
@@ -175,7 +213,7 @@ function updateButtons() {
   const hasA = !!bufA;
   const hasB = !!bufB;
   btnCompare.disabled = !(hasA && hasB);
-  btnSingle.disabled = !(hasA || hasB);
+  btnSingle.disabled = !hasB; // 單檔 = 新年 Excel only
 }
 
 function wireDrop(dropEl, inputEl, which) {
@@ -205,8 +243,8 @@ function loadFile(file, which) {
       nameB.classList.remove('empty');
     }
     updateButtons();
-    // Auto single-check when only one file is present
-    if ((bufA && !bufB) || (!bufA && bufB)) {
+    // Auto single-check only when 新年 Excel is set (and no compare pair yet)
+    if (bufB && !bufA) {
       runSingle();
     }
   };
@@ -487,6 +525,52 @@ const COMPARE_FIELDS = [
   { key: 'reason', label: 'Reason' },
 ];
 
+let lastChangedForExcel = [];
+
+function dispVal(v) {
+  const t = s(v);
+  return t === '' ? '（空）' : t;
+}
+
+function changeCell(tA, tB, key) {
+  if (valEq(tA[key], tB[key])) return { html: '<span class="same">—</span>', cls: 'same', text: '—' };
+  const txt = `${dispVal(tA[key])} → ${dispVal(tB[key])}`;
+  return { html: esc(txt), cls: 'changed', text: txt };
+}
+
+function buildChangeTable(changed) {
+  if (!changed.length) {
+    return `<div class="table-wrap"><table class="excel"><thead><tr><th>Tree No</th></tr></thead><tbody><tr><td>無欄位變動</td></tr></tbody></table></div>`;
+  }
+  const headers = ['Tree No', ...COMPARE_FIELDS.map(f => f.label)];
+  const head = headers.map(h => `<th>${esc(h)}</th>`).join('');
+  const body = changed.map(c => {
+    const cells = [`<td><b>${esc(c.no)}</b></td>`];
+    for (const f of COMPARE_FIELDS) {
+      const cell = changeCell(c.tA, c.tB, f.key);
+      cells.push(`<td class="${cell.cls}">${cell.html}</td>`);
+    }
+    return `<tr>${cells.join('')}</tr>`;
+  }).join('');
+  return `<div class="table-wrap"><table class="excel"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
+}
+
+function downloadChangedExcel() {
+  if (!lastChangedForExcel.length) return;
+  const rows = lastChangedForExcel.map(c => {
+    const row = { 'Tree No': c.no };
+    for (const f of COMPARE_FIELDS) {
+      row[`${f.label}舊`] = s(c.tA[f.key]);
+      row[`${f.label}新`] = s(c.tB[f.key]);
+    }
+    return row;
+  });
+  const ws = XLSX.utils.json_to_sheet(rows);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, '欄位有變');
+  XLSX.writeFile(wb, '欄位有變.xlsx');
+}
+
 function renderCompare(treesA, treesB, nameOld, nameNew) {
   const mapA = new Map();
   const mapB = new Map();
@@ -517,17 +601,11 @@ function renderCompare(treesA, treesB, nameOld, nameNew) {
 
   const hfPoor = bothPoor(treesB);
 
-  const changeCards = () => {
-    if (!changed.length) {
-      return `<div class="result-grid"><div class="result-card result-empty">無欄位變動</div></div>`;
-    }
-    return `<div class="result-grid">${changed.map(c => {
-      const rows = c.diffs.map(d =>
-        `<div class="row"><span>${esc(d.label)}：</span>舊 ${esc(d.old) || '（空）'} → 新 ${esc(d.neu) || '（空）'}</div>`
-      ).join('');
-      return `<div class="result-card"><div class="tn">${esc(c.no)}</div>${rows}</div>`;
-    }).join('')}</div>`;
-  };
+  lastChangedForExcel = changed;
+
+  const dlBtn = changed.length
+    ? `<div class="section-actions"><button type="button" class="btn-sm" id="btnDlChanged">下載 Excel</button></div>`
+    : '';
 
   return `
     <p class="note">對比：舊年「${esc(nameOld)}」↔ 新年「${esc(nameNew)}」</p>
@@ -544,19 +622,19 @@ function renderCompare(treesA, treesB, nameOld, nameNew) {
     <h2>2. 只在新年　${badge(onlyB.length, false)}</h2>
     ${cards(onlyB, ['no', 'sp', 'health', 'form', 'triage', 'overall'], '無（新年獨有）')}
     <h2>3. 欄位有變　${badge(changed.length, false)}</h2>
-    ${changeCards()}
+    ${dlBtn}
+    ${buildChangeTable(changed)}
     <h2>4. Health 與 Form 都是 Poor（新年）　${badge(hfPoor.length, false)}</h2>
     ${cards(hfPoor, ['no', 'sp', 'health', 'form', 'triage', 'overall'], '無 Health & Form 都是 Poor')}
   `;
 }
 
 function runSingle() {
-  const buf = bufB || bufA;
-  const name = bufB ? fileNameB : fileNameA;
-  if (!buf) return;
+  // 單檔檢查 = 新年 Excel only
+  if (!bufB) return;
   try {
-    const trees = parseTrees(buf);
-    out.innerHTML = renderSingle(trees, name);
+    const trees = parseTrees(bufB);
+    out.innerHTML = renderSingle(trees, fileNameB);
   } catch (err) {
     out.innerHTML = `<p class="bad">讀取失敗：${esc(err.message || err)}</p>`;
   }
@@ -568,6 +646,8 @@ function runCompare() {
     const treesA = parseTrees(bufA);
     const treesB = parseTrees(bufB);
     out.innerHTML = renderCompare(treesA, treesB, fileNameA, fileNameB);
+    const dl = document.getElementById('btnDlChanged');
+    if (dl) dl.onclick = () => downloadChangedExcel();
   } catch (err) {
     out.innerHTML = `<p class="bad">對比失敗：${esc(err.message || err)}</p>`;
   }
