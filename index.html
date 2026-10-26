@@ -133,8 +133,13 @@
     z-index: 1;
   }
   table.excel tbody tr:nth-child(even) { background: #f3f6f9; }
-  table.excel td.changed { color: #b00020; font-weight: 600; }
-  table.excel td.same { color: #999; }
+  table.excel td.changed { background: #fff2cc; color: #222; font-weight: 600; }
+  table.excel td.same { color: #999; background: #fff; }
+  table.excel th.sub { background: #2e6a9e; font-weight: 600; font-size: 12px; }
+  table.excel td.tree-no { position: sticky; left: 0; background: #fff; z-index: 2; font-weight: 700; color: #1F4E79; }
+  table.excel tbody tr:nth-child(even) td.tree-no { background: #f3f6f9; }
+  table.excel .corner { background: #1F4E79; }
+  .excel-caption { font-size: 12px; color: #666; margin: 4px 0 8px; }
   .section-actions { margin: 8px 0 4px; }
   .btn-sm {
     border: 0;
@@ -542,17 +547,22 @@ function buildChangeTable(changed) {
   if (!changed.length) {
     return `<div class="table-wrap"><table class="excel"><thead><tr><th>Tree No</th></tr></thead><tbody><tr><td>無欄位變動</td></tr></tbody></table></div>`;
   }
-  const headers = ['Tree No', ...COMPARE_FIELDS.map(f => f.label)];
-  const head = headers.map(h => `<th>${esc(h)}</th>`).join('');
+  // Excel-style: Tree No + each field as 舊 / 新 columns
+  const top = [`<th class="corner" rowspan="2">Tree No</th>`]
+    .concat(COMPARE_FIELDS.map(f => `<th colspan="2">${esc(f.label)}</th>`))
+    .join('');
+  const sub = COMPARE_FIELDS.map(() => `<th class="sub">舊</th><th class="sub">新</th>`).join('');
   const body = changed.map(c => {
-    const cells = [`<td><b>${esc(c.no)}</b></td>`];
+    const cells = [`<td class="tree-no">${esc(c.no)}</td>`];
     for (const f of COMPARE_FIELDS) {
-      const cell = changeCell(c.tA, c.tB, f.key);
-      cells.push(`<td class="${cell.cls}">${cell.html}</td>`);
+      const same = valEq(c.tA[f.key], c.tB[f.key]);
+      const cls = same ? 'same' : 'changed';
+      cells.push(`<td class="${cls}">${esc(dispVal(c.tA[f.key]))}</td>`);
+      cells.push(`<td class="${cls}">${esc(dispVal(c.tB[f.key]))}</td>`);
     }
     return `<tr>${cells.join('')}</tr>`;
   }).join('');
-  return `<div class="table-wrap"><table class="excel"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
+  return `<p class="excel-caption">網頁以 Excel 列表顯示（每欄分舊／新；黃色＝有變動）</p><div class="table-wrap"><table class="excel"><thead><tr>${top}</tr><tr>${sub}</tr></thead><tbody>${body}</tbody></table></div>`;
 }
 
 function downloadChangedExcel() {
