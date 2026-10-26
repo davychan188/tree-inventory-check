@@ -6,8 +6,14 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <style>
-  body { font-family: Arial, "Microsoft JhengHei", sans-serif; margin: 24px; color: #222; }
-  h1 { font-size: 22px; }
+  body {
+    font-family: Arial, "Microsoft JhengHei", sans-serif;
+    margin: 0;
+    padding: 24px;
+    color: #222;
+    background: #f4f6f5;
+  }
+  h1 { font-size: 22px; margin-top: 0; }
   #drop {
     border: 2px dashed #1F4E79; border-radius: 10px; padding: 36px;
     text-align: center; color: #1F4E79; background: #f4f8fb; cursor: pointer;
@@ -34,10 +40,41 @@
   }
   .card .label { font-size: 13px; color: #444; line-height: 1.3; }
   .card b { font-size: 28px; display: block; margin-top: 8px; color: #1F4E79; }
-  .table-wrap { overflow-x: auto; margin: 8px 0 18px; }
-  table { border-collapse: collapse; width: 100%; font-size: 13px; }
-  th, td { border: 1px solid #ccc; padding: 5px 8px; text-align: left; }
-  th { background: #1F4E79; color: #fff; }
+  .result-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 12px;
+    margin: 8px 0 18px;
+  }
+  .result-card {
+    background: #fff;
+    border: 1px solid #d8dde3;
+    border-radius: 12px;
+    padding: 12px 14px;
+    box-shadow: 0 1px 3px rgba(0,0,0,.08);
+    min-height: 120px;
+    box-sizing: border-box;
+  }
+  .result-card .tn {
+    font-weight: 700;
+    font-size: 15px;
+    color: #1F4E79;
+    margin-bottom: 8px;
+  }
+  .result-card .row {
+    font-size: 12px;
+    color: #555;
+    margin: 3px 0;
+    line-height: 1.35;
+  }
+  .result-card .row span { color: #888; }
+  .result-empty {
+    color: #0a7a2f;
+    font-weight: bold;
+    display: flex;
+    align-items: center;
+    min-height: 60px;
+  }
   .ok { color: #0a7a2f; font-weight: bold; }
   .bad { color: #b00020; font-weight: bold; }
   .note { color: #555; font-size: 13px; }
@@ -64,6 +101,20 @@ function num(v) {
 }
 function s(v) { return String(v ?? '').trim(); }
 function esc(v) { return s(v).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+
+const FIELD_LABELS = {
+  no: 'Tree No',
+  sp: 'Species',
+  h: 'Height',
+  agg: 'Agg. DBH',
+  triage: 'Triage',
+  status: 'Status',
+  rem: 'Remedial',
+  others: 'Others',
+  spread: 'Spread',
+  trunk: 'Trunk',
+  overall: 'Overall',
+};
 
 function run(file) {
   const reader = new FileReader();
@@ -116,9 +167,17 @@ function run(file) {
     const oN = trees.filter(t => t.triage === 'Orange').length;
 
     const badge = (n, okZero=true) => `<span class="${(okZero ? n===0 : n>0) ? 'ok' : 'bad'}">${n}</span>`;
-    const table = (list, cols, empty='無') => {
-      if (!list.length) return `<tr><td colspan="${cols.length}" class="ok">${empty}</td></tr>`;
-      return list.map(t => '<tr>' + cols.map(c => `<td>${esc(t[c])}</td>`).join('') + '</tr>').join('');
+    const cards = (list, cols, empty='無') => {
+      if (!list.length) {
+        return `<div class="result-grid"><div class="result-card result-empty">${esc(empty)}</div></div>`;
+      }
+      const fieldCols = cols.filter(c => c !== 'no');
+      return `<div class="result-grid">${list.map(t => {
+        const rowsHtml = fieldCols.map(c =>
+          `<div class="row"><span>${FIELD_LABELS[c] || c}：</span>${esc(t[c])}</div>`
+        ).join('');
+        return `<div class="result-card"><div class="tn">${esc(t.no)}</div>${rowsHtml}</div>`;
+      }).join('')}</div>`;
     };
 
     document.getElementById('out').innerHTML = `
@@ -133,22 +192,20 @@ function run(file) {
         <div class="card"><span class="label">Large (H≥9 / DBH≥500)</span><b>${large.length}</b></div>
       </div>
       <h2>1. Large tree 未標 Yellow / Orange　${badge(miss.length)}</h2>
-      <div class="table-wrap"><table><tr><th>Tree No</th><th>Species</th><th>Height</th><th>Agg. DBH</th><th>Triage</th><th>Status</th></tr>
-      ${table(miss, ['no','sp','h','agg','triage','status'])}</table></div>
+      ${cards(miss, ['no','sp','h','agg','triage','status'])}
       <h2>2. Yellow Status 不是 Large Tree　${badge(yBad.length)}</h2>
-      <div class="table-wrap"><table><tr><th>Tree No</th><th>Species</th><th>Status</th></tr>${table(yBad, ['no','sp','status'])}</table></div>
+      ${cards(yBad, ['no','sp','status'])}
       <h2>3. Orange Status 不是 Tree in Confined Site　${badge(oBad.length)}</h2>
-      <div class="table-wrap"><table><tr><th>Tree No</th><th>Species</th><th>Status</th></tr>${table(oBad, ['no','sp','status'])}</table></div>
+      ${cards(oBad, ['no','sp','status'])}
       <h2>4. Yellow/Orange Remedial 不是 Form 2 / Others　${badge(badRem.length)}</h2>
-      <div class="table-wrap"><table><tr><th>Tree No</th><th>Triage</th><th>Remedial</th></tr>${table(badRem, ['no','triage','rem'])}</table></div>
+      ${cards(badRem, ['no','triage','rem'])}
       <h2>5. Others 不是 Reinspection within 12 months　${badge(badOth.length)}</h2>
-      <div class="table-wrap"><table><tr><th>Tree No</th><th>Others</th></tr>${table(badOth, ['no','others'])}</table></div>
+      ${cards(badOth, ['no','others'])}
       <h2>6. Removed 量度不是全 0　${badge(remBad.length)}</h2>
       <p class="note">Removed 共 ${removed.length} 棵，只檢查 Height / Spread / DBH1–5 / Agg. DBH / Trunk No. 是否全為 0，不列出清單。</p>
-      <div class="table-wrap"><table><tr><th>Tree No</th><th>Height</th><th>Spread</th><th>Agg. DBH</th><th>Trunk</th></tr>${table(remBad, ['no','h','spread','agg','trunk'])}</table></div>
+      ${cards(remBad, ['no','h','spread','agg','trunk'])}
       <h2>7. Overall Conditions = Poor　${badge(poor.length, false)}</h2>
-      <div class="table-wrap"><table><tr><th>Tree No</th><th>Species</th><th>Overall</th><th>Triage</th><th>Height</th><th>Agg. DBH</th></tr>
-      ${table(poor, ['no','sp','overall','triage','h','agg'], '無 Overall Poor')}</table></div>
+      ${cards(poor, ['no','sp','overall','triage','h','agg'], '無 Overall Poor')}
     `;
   };
   reader.readAsArrayBuffer(file);
