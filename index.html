@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<title>Tree Inventory Auto Check</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<style>
+  body { font-family: Arial, "Microsoft JhengHei", sans-serif; margin: 24px; color: #222; }
+  h1 { font-size: 22px; }
+  #drop {
+    border: 2px dashed #1F4E79; border-radius: 10px; padding: 36px;
+    text-align: center; color: #1F4E79; background: #f4f8fb; cursor: pointer;
+  }
+  #drop.over { background: #e3eef8; }
+  .cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 12px;
+    margin: 16px 0;
+  }
+  .card {
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    padding: 14px 12px;
+    background: #f7f9fb;
+    aspect-ratio: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    box-sizing: border-box;
+  }
+  .card .label { font-size: 13px; color: #444; line-height: 1.3; }
+  .card b { font-size: 28px; display: block; margin-top: 8px; color: #1F4E79; }
+  .table-wrap { overflow-x: auto; margin: 8px 0 18px; }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th, td { border: 1px solid #ccc; padding: 5px 8px; text-align: left; }
+  th { background: #1F4E79; color: #fff; }
+  .ok { color: #0a7a2f; font-weight: bold; }
+  .bad { color: #b00020; font-weight: bold; }
+  .note { color: #555; font-size: 13px; }
+  h2 { font-size: 16px; margin-top: 28px; border-bottom: 1px solid #ccc; padding-bottom: 4px; }
+</style>
+</head>
+<body>
+<h1>Tree Inventory 自動檢查</h1>
+<div id="drop">把 export Excel 拖到這裡，或點擊選擇檔案<br><span class="note">檢查 DBH≥500 / 高度≥9、Triage、Status、Remedial、Removed 是否全 0；只列出 Overall Poor</span></div>
+<input type="file" id="file" accept=".xlsx,.xls" hidden>
+<div id="out"></div>
+<script>
+const drop = document.getElementById('drop');
+const fileInput = document.getElementById('file');
+drop.onclick = () => fileInput.click();
+drop.ondragover = e => { e.preventDefault(); drop.classList.add('over'); };
+drop.ondragleave = () => drop.classList.remove('over');
+drop.ondrop = e => { e.preventDefault(); drop.classList.remove('over'); if (e.dataTransfer.files[0]) run(e.dataTransfer.files[0]); };
+fileInput.onchange = () => { if (fileInput.files[0]) run(fileInput.files[0]); };
+
+function num(v) {
+  const n = parseFloat(String(v ?? '').replace(/,/g, ''));
+  return isNaN(n) ? 0 : n;
+}
+function s(v) { return String(v ?? '').trim(); }
+function esc(v) { return s(v).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+
+function run(file) {
+  const reader = new FileReader();
+  reader.onload = e => {
+    const wb = XLSX.read(e.target.result, { type: 'array' });
+    const sheet = wb.Sheets[wb.SheetNames[0]];
+    const raw = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+    let headerRow = 0;
+    for (let i = 0; i < Math.min(raw.length, 20); i++) {
+      const joined = raw[i].map(x => String(x).toLowerCase()).join(' ');
+      if (joined.includes('tree no') && joined.includes('triage')) { headerRow = i; break; }
+    }
+    const headers = raw[headerRow].map(x => s(x));
+    const rows = raw.slice(headerRow + 1).map(r => {
+      const o = {};
+      headers.forEach((h, i) => o[h] = r[i]);
+      return o;
+    }).filter(r => /^[A-Za-z]{1,6}-?T\d+/i.test(s(r['Tree No'])) || /^YO-/i.test(s(r['Tree No'])));
+
+    const trees = rows.map(r => ({
+      no: s(r['Tree No']),
+      sp: s(r['Tree Species']),
+      h: num(r['Height (m)']),
+      spread: num(r['Crown Spread (m)']),
+      dbh: [num(r['DBH1 (mm)']), num(r['DBH2 (mm)']), num(r['DBH3 (mm)']), num(r['DBH4 (mm)']), num(r['DBH5 (mm)'])],
+      agg: num(r['Aggregated DBH (mm)']),
+      trunk: num(r['Trunk No.']),
+      reason: s(r['Tree not inspected Reason']),
+      triage: s(r['Triage Colour']),
+      status: s(r['Tree Status']),
+      overall: s(r['Overall Conditions']),
+      rem: s(r['Remedial Action']),
+      others: s(r['Remedial Action (Others)']),
+    }));
+
+    const removed = trees.filter(t => /removed/i.test(t.reason));
+    const active = trees.filter(t => !/removed/i.test(t.reason));
+    const isLarge = t => t.agg >= 500 || t.h >= 9;
+    const large = active.filter(isLarge);
+    const miss = large.filter(t => !['Yellow','Orange'].includes(t.triage));
+    const yBad = trees.filter(t => t.triage === 'Yellow' && !/Large Tree/i.test(t.status));
+    const oBad = trees.filter(t => t.triage === 'Orange' && !/Confined/i.test(t.status));
+    const yo = trees.filter(t => ['Yellow','Orange'].includes(t.triage));
+    const badRem = yo.filter(t => !['Form 2 Assessment','Others'].includes(t.rem));
+    const badOth = yo.filter(t => t.rem === 'Others' && !/reinspection/i.test(t.others));
+    const poor = trees.filter(t => /^poor$/i.test(t.overall));
+    const remBad = removed.filter(t => !(t.h===0 && t.spread===0 && t.dbh.every(x=>x===0) && t.agg===0 && t.trunk===0));
+    const dbh95 = active.filter(t => t.agg >= 95);
+    const yN = trees.filter(t => t.triage === 'Yellow').length;
+    const oN = trees.filter(t => t.triage === 'Orange').length;
+
+    const badge = (n, okZero=true) => `<span class="${(okZero ? n===0 : n>0) ? 'ok' : 'bad'}">${n}</span>`;
+    const table = (list, cols, empty='無') => {
+      if (!list.length) return `<tr><td colspan="${cols.length}" class="ok">${empty}</td></tr>`;
+      return list.map(t => '<tr>' + cols.map(c => `<td>${esc(t[c])}</td>`).join('') + '</tr>').join('');
+    };
+
+    document.getElementById('out').innerHTML = `
+      <p class="note">檔案：${esc(file.name)}　共 ${trees.length} 棵</p>
+      <div class="cards">
+        <div class="card"><span class="label">總樹數</span><b>${trees.length}</b></div>
+        <div class="card"><span class="label">有效樹</span><b>${active.length}</b></div>
+        <div class="card"><span class="label">Removed</span><b>${removed.length}</b></div>
+        <div class="card"><span class="label">DBH ≥ 95</span><b>${dbh95.length}</b></div>
+        <div class="card"><span class="label">Yellow</span><b>${yN}</b></div>
+        <div class="card"><span class="label">Orange</span><b>${oN}</b></div>
+        <div class="card"><span class="label">Large (H≥9 / DBH≥500)</span><b>${large.length}</b></div>
+      </div>
+      <h2>1. Large tree 未標 Yellow / Orange　${badge(miss.length)}</h2>
+      <div class="table-wrap"><table><tr><th>Tree No</th><th>Species</th><th>Height</th><th>Agg. DBH</th><th>Triage</th><th>Status</th></tr>
+      ${table(miss, ['no','sp','h','agg','triage','status'])}</table></div>
+      <h2>2. Yellow Status 不是 Large Tree　${badge(yBad.length)}</h2>
+      <div class="table-wrap"><table><tr><th>Tree No</th><th>Species</th><th>Status</th></tr>${table(yBad, ['no','sp','status'])}</table></div>
+      <h2>3. Orange Status 不是 Tree in Confined Site　${badge(oBad.length)}</h2>
+      <div class="table-wrap"><table><tr><th>Tree No</th><th>Species</th><th>Status</th></tr>${table(oBad, ['no','sp','status'])}</table></div>
+      <h2>4. Yellow/Orange Remedial 不是 Form 2 / Others　${badge(badRem.length)}</h2>
+      <div class="table-wrap"><table><tr><th>Tree No</th><th>Triage</th><th>Remedial</th></tr>${table(badRem, ['no','triage','rem'])}</table></div>
+      <h2>5. Others 不是 Reinspection within 12 months　${badge(badOth.length)}</h2>
+      <div class="table-wrap"><table><tr><th>Tree No</th><th>Others</th></tr>${table(badOth, ['no','others'])}</table></div>
+      <h2>6. Removed 量度不是全 0　${badge(remBad.length)}</h2>
+      <p class="note">Removed 共 ${removed.length} 棵，只檢查 Height / Spread / DBH1–5 / Agg. DBH / Trunk No. 是否全為 0，不列出清單。</p>
+      <div class="table-wrap"><table><tr><th>Tree No</th><th>Height</th><th>Spread</th><th>Agg. DBH</th><th>Trunk</th></tr>${table(remBad, ['no','h','spread','agg','trunk'])}</table></div>
+      <h2>7. Overall Conditions = Poor　${badge(poor.length, false)}</h2>
+      <div class="table-wrap"><table><tr><th>Tree No</th><th>Species</th><th>Overall</th><th>Triage</th><th>Height</th><th>Agg. DBH</th></tr>
+      ${table(poor, ['no','sp','overall','triage','h','agg'], '無 Overall Poor')}</table></div>
+    `;
+  };
+  reader.readAsArrayBuffer(file);
+}
+</script>
+</body>
+</html>
