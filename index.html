@@ -444,6 +444,35 @@ function renderSingle(trees, fileLabel) {
   const cavityList = trees.filter(hasCavity);
   const leanList = trees.filter(hasLean);
 
+  const sections = [
+    { title: '1. Large tree 未標 Yellow / Orange', sheetName: '1 Large no Y/O', cols: ['no', 'sp', 'h', 'agg', 'triage', 'status'], list: miss },
+    { title: '1b. 非 Large（H<9 且 DBH<500）但 Triage 為 Yellow／Orange／Red', sheetName: '1b Small Y/O/R', cols: ['no', 'sp', 'h', 'agg', 'triage', 'status'], list: smallYor },
+    { title: '2. Yellow Status 不是 Large Tree', sheetName: '2 Yellow not Large', cols: ['no', 'sp', 'status'], list: yBad },
+    { title: '3. Orange Status 不是 Tree in Confined Site', sheetName: '3 Orange not Confined', cols: ['no', 'sp', 'status'], list: oBad },
+    { title: '4. Yellow/Orange Remedial 不是 Form 2 / Others', sheetName: '4 Rem not Form2', cols: ['no', 'triage', 'rem'], list: badRem },
+    { title: '5. Others 不是 Reinspection within 12 months', sheetName: '5 Others not Reinsp', cols: ['no', 'others'], list: badOth },
+    { title: '6. Removed 量度不是全 0', sheetName: '6 Removed not 0', cols: ['no', 'h', 'spread', 'agg', 'trunk'], list: remBad },
+    { title: '7. Overall Conditions = Poor', sheetName: '7 Overall Poor', cols: ['no', 'sp', 'overall', 'triage', 'h', 'agg'], list: poor },
+    { title: '8. Health 與 Form 都是 Poor', sheetName: '8 Health Form Poor', cols: ['no', 'sp', 'health', 'form', 'triage', 'overall'], list: hfPoor },
+    { title: '9. Cavity', sheetName: '9 Cavity', cols: ['no', 'sp', 'cavity', 'triage', 'overall'], list: cavityList },
+    { title: '10. Lean', sheetName: '10 Lean', cols: ['no', 'sp', 'lean', 'triage', 'overall'], list: leanList },
+  ];
+
+  lastSingleSummary = {
+    fileLabel,
+    counts: {
+      total: trees.length,
+      active: active.length,
+      removed: removed.length,
+      dbh95: dbh95.length,
+      yellow: yN,
+      orange: oN,
+      large: large.length,
+      hfPoor: hfPoor.length,
+    },
+    sections,
+  };
+
   return `
     <p class="note">檔案：${esc(fileLabel)}　共 ${trees.length} 棵</p>
     <div class="kpis">
@@ -456,6 +485,7 @@ function renderSingle(trees, fileLabel) {
       <div class="kpi"><b>${large.length}</b><span>Large (H≥9 / DBH≥500)</span></div>
       <div class="kpi"><b>${hfPoor.length}</b><span>Health & Form Poor</span></div>
     </div>
+    <div class="section-actions"><button type="button" class="btn-sm" id="btnDlSingleSummary">下載 Excel summary</button></div>
     <h2>1. Large tree 未標 Yellow / Orange　${badge(miss.length)}</h2>
     ${excelList(miss, ['no', 'sp', 'h', 'agg', 'triage', 'status'])}
     <h2>1b. 非 Large（H&lt;9 且 DBH&lt;500）但 Triage 為 Yellow／Orange／Red　${badge(smallYor.length)}</h2>
@@ -506,6 +536,7 @@ const COMPARE_FIELDS = [
 ];
 
 let lastChangedForExcel = [];
+let lastSingleSummary = null;
 
 function dispVal(v) {
   const t = s(v);
@@ -555,6 +586,52 @@ function downloadChangedExcel() {
   XLSX.utils.book_append_sheet(wb, ws, '欄位有變');
   XLSX.writeFile(wb, '欄位有變.xlsx');
 }
+
+function cellVal(t, key) {
+  const v = t[key];
+  if (typeof v === 'number' && !Number.isNaN(v)) return v;
+  return s(v);
+}
+
+function treesToSheetRows(list, cols) {
+  return list.map(t => {
+    const row = {};
+    for (const c of cols) {
+      row[FIELD_LABELS[c] || c] = cellVal(t, c);
+    }
+    return row;
+  });
+}
+
+function downloadSingleSummary() {
+  if (!lastSingleSummary) return;
+  const { fileLabel, counts, sections } = lastSingleSummary;
+  const summaryRows = [
+    { Item: '檔案', Count: fileLabel },
+    { Item: '總樹數', Count: counts.total },
+    { Item: '有效樹', Count: counts.active },
+    { Item: 'Removed', Count: counts.removed },
+    { Item: 'DBH ≥ 95', Count: counts.dbh95 },
+    { Item: 'Yellow', Count: counts.yellow },
+    { Item: 'Orange', Count: counts.orange },
+    { Item: 'Large (H≥9 / DBH≥500)', Count: counts.large },
+    { Item: 'Health & Form Poor', Count: counts.hfPoor },
+  ];
+  for (const sec of sections) {
+    summaryRows.push({ Item: sec.title, Count: sec.list.length });
+  }
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summaryRows), 'Summary');
+  for (const sec of sections) {
+    if (!sec.list.length) continue;
+    const rows = treesToSheetRows(sec.list, sec.cols);
+    const name = sec.sheetName.slice(0, 31);
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), name);
+  }
+  const base = s(fileLabel).replace(/\.[^.]+$/, '').replace(/[\\/:*?"<>|]/g, '_') || '單檔檢查';
+  XLSX.writeFile(wb, `${base}_summary.xlsx`);
+}
+
 
 function renderCompare(treesA, treesB, nameOld, nameNew) {
   const a = treesA.filter(t => !isOutOfCompare(t));
@@ -626,6 +703,8 @@ function runSingle() {
   try {
     const trees = parseTrees(bufB);
     out.innerHTML = renderSingle(trees, fileNameB);
+    const dl = document.getElementById('btnDlSingleSummary');
+    if (dl) dl.onclick = () => downloadSingleSummary();
   } catch (err) {
     out.innerHTML = `<p class="bad">讀取失敗：${esc(err.message || err)}</p>`;
   }
