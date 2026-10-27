@@ -379,6 +379,31 @@ function cards(list, cols, empty = '無') {
   }).join('')}</div>`;
 }
 
+
+function excelList(list, cols, emptyMsg = '無') {
+  const fieldCols = cols.filter(c => c !== 'no');
+  const headers = ['no', ...fieldCols];
+  const th = headers.map((c, i) => {
+    const label = FIELD_LABELS[c] || c;
+    const cls = i === 0 ? ' class="corner"' : '';
+    return `<th${cls}>${esc(label)}</th>`;
+  }).join('');
+  if (!list.length) {
+    const colspan = headers.length;
+    return `<div class="table-wrap"><table class="excel"><thead><tr>${th}</tr></thead><tbody><tr><td colspan="${colspan}">${esc(emptyMsg)}</td></tr></tbody></table></div>`;
+  }
+  const body = list.map(t => {
+    const cells = headers.map((c, i) => {
+      const cls = i === 0 ? ' class="tree-no"' : '';
+      const val = i === 0 ? s(t.no) : dispVal(t[c]);
+      return `<td${cls}>${esc(val)}</td>`;
+    }).join('');
+    return `<tr>${cells}</tr>`;
+  }).join('');
+  return `<div class="table-wrap"><table class="excel"><thead><tr>${th}</tr></thead><tbody>${body}</tbody></table></div>`;
+}
+
+
 function bothPoor(trees) {
   return trees.filter(t => /^poor$/i.test(t.health) && /^poor$/i.test(t.form));
 }
@@ -451,28 +476,28 @@ function renderSingle(trees, fileLabel) {
       <div class="kpi"><b>${hfPoor.length}</b><span>Health & Form Poor</span></div>
     </div>
     <h2>1. Large tree 未標 Yellow / Orange　${badge(miss.length)}</h2>
-    ${cards(miss, ['no', 'sp', 'h', 'agg', 'triage', 'status'])}
+    ${excelList(miss, ['no', 'sp', 'h', 'agg', 'triage', 'status'])}
     <h2>1b. 非 Large（H&lt;9 且 DBH&lt;500）但 Triage 為 Yellow／Orange／Red　${badge(smallYor.length)}</h2>
-    ${cards(smallYor, ['no', 'sp', 'h', 'agg', 'triage', 'status'], '無')}
+    ${excelList(smallYor, ['no', 'sp', 'h', 'agg', 'triage', 'status'], '無')}
     <h2>2. Yellow Status 不是 Large Tree　${badge(yBad.length)}</h2>
-    ${cards(yBad, ['no', 'sp', 'status'])}
+    ${excelList(yBad, ['no', 'sp', 'status'])}
     <h2>3. Orange Status 不是 Tree in Confined Site　${badge(oBad.length)}</h2>
-    ${cards(oBad, ['no', 'sp', 'status'])}
+    ${excelList(oBad, ['no', 'sp', 'status'])}
     <h2>4. Yellow/Orange Remedial 不是 Form 2 / Others　${badge(badRem.length)}</h2>
-    ${cards(badRem, ['no', 'triage', 'rem'])}
+    ${excelList(badRem, ['no', 'triage', 'rem'])}
     <h2>5. Others 不是 Reinspection within 12 months　${badge(badOth.length)}</h2>
-    ${cards(badOth, ['no', 'others'])}
+    ${excelList(badOth, ['no', 'others'])}
     <h2>6. Removed 量度不是全 0　${badge(remBad.length)}</h2>
     <p class="note">Removed 共 ${removed.length} 棵，只檢查 Height / Spread / DBH1–5 / Agg. DBH / Trunk No. 是否全為 0，不列出清單。</p>
-    ${cards(remBad, ['no', 'h', 'spread', 'agg', 'trunk'])}
+    ${excelList(remBad, ['no', 'h', 'spread', 'agg', 'trunk'])}
     <h2>7. Overall Conditions = Poor　${badge(poor.length, false)}</h2>
-    ${cards(poor, ['no', 'sp', 'overall', 'triage', 'h', 'agg'], '無 Overall Poor')}
+    ${excelList(poor, ['no', 'sp', 'overall', 'triage', 'h', 'agg'], '無 Overall Poor')}
     <h2>8. Health 與 Form 都是 Poor　${badge(hfPoor.length, false)}</h2>
-    ${cards(hfPoor, ['no', 'sp', 'health', 'form', 'triage', 'overall'], '無 Health & Form 都是 Poor')}
+    ${excelList(hfPoor, ['no', 'sp', 'health', 'form', 'triage', 'overall'], '無 Health & Form 都是 Poor')}
     <h2>9. Cavity　${badge(cavityList.length, false)}</h2>
-    ${cards(cavityList, ['no', 'sp', 'cavity', 'triage', 'overall'], '無 Cavity')}
+    ${excelList(cavityList, ['no', 'sp', 'cavity', 'triage', 'overall'], '無 Cavity')}
     <h2>10. Lean　${badge(leanList.length, false)}</h2>
-    ${cards(leanList, ['no', 'sp', 'lean', 'triage', 'overall'], '無 Lean')}
+    ${excelList(leanList, ['no', 'sp', 'lean', 'triage', 'overall'], '無 Lean')}
   `;
 }
 
