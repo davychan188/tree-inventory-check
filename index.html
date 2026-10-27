@@ -127,6 +127,8 @@ const FIELD_LABELS = {
   health: 'Health',
   form: 'Form',
   reason: 'Reason',
+  cavity: 'Cavity',
+  lean: 'Lean',
 };
 
 function updateButtons() {
@@ -251,6 +253,9 @@ function parseTrees(arrayBuffer) {
       return o;
     }).filter(r => isInventoryTreeNo(s(r['Tree No'])));
 
+    const cavityIdx = findCol(headers, h => /cavity/i.test(h));
+    const leanIdx = findCol(headers, h => /\blean\b/i.test(h));
+    const remarksIdx = findCol(headers, h => /remarks?|defect/i.test(h));
     return rows.map(r => {
       const arr = headers.map((_, i) => r[headers[i]]);
       return {
@@ -269,6 +274,9 @@ function parseTrees(arrayBuffer) {
         others: s(r['Remedial Action (Others)']),
         health: healthIdx >= 0 ? s(arr[healthIdx]) : s(getHeaderVal(r, ['Health Condition', 'Health Conditions', 'Health'])),
         form: formIdx >= 0 ? s(arr[formIdx]) : s(getHeaderVal(r, ['Form Condition', 'Form Conditions', 'Form', 'Structural Condition'])),
+        cavity: cavityIdx >= 0 ? s(arr[cavityIdx]) : s(getHeaderVal(r, ['Cavity', 'Cavities'])),
+        lean: leanIdx >= 0 ? s(arr[leanIdx]) : s(getHeaderVal(r, ['Lean', 'Leaning'])),
+        remarks: remarksIdx >= 0 ? s(arr[remarksIdx]) : s(getHeaderVal(r, ['Remarks', 'Remark', 'Defect', 'Defects'])),
       };
     });
   }
@@ -346,6 +354,9 @@ function parseTrees(arrayBuffer) {
       others: '',
       health: hIdx >= 0 ? s(row[hIdx]) : '',
       form: fIdx >= 0 ? s(row[fIdx]) : '',
+      cavity: '',
+      lean: '',
+      remarks: '',
     });
   }
   return trees;
@@ -372,6 +383,39 @@ function bothPoor(trees) {
   return trees.filter(t => /^poor$/i.test(t.health) && /^poor$/i.test(t.form));
 }
 
+/** Exclude Removed / Tree not inspect from year compare */
+function isOutOfCompare(t) {
+  const r = s(t.reason);
+  const blob = `${r} ${s(t.status)} ${s(t.overall)}`;
+  if (/removed/i.test(blob)) return true;
+  if (/not\s*inspect/i.test(blob)) return true;
+  // non-empty Tree not inspected Reason = not inspected
+  if (r !== '') return true;
+  return false;
+}
+
+function isTruthyFlag(v) {
+  const t = s(v);
+  if (t === '') return false;
+  if (/^(n|no|0|-|n\.?a\.?|na|nil|none|無|否)$/i.test(t)) return false;
+  return true;
+}
+
+function treeBlob(t) {
+  return [t.cavity, t.lean, t.status, t.overall, t.rem, t.others, t.reason, t.health, t.form, t.remarks]
+    .map(s).join(' ');
+}
+
+function hasCavity(t) {
+  if (isTruthyFlag(t.cavity)) return true;
+  return /cavity/i.test(treeBlob(t));
+}
+
+function hasLean(t) {
+  if (isTruthyFlag(t.lean)) return true;
+  return /\blean\b/i.test(treeBlob(t));
+}
+
 function renderSingle(trees, fileLabel) {
   const removed = trees.filter(t => /removed/i.test(t.reason));
   const active = trees.filter(t => !/removed/i.test(t.reason));
@@ -391,6 +435,8 @@ function renderSingle(trees, fileLabel) {
   const yN = trees.filter(t => t.triage === 'Yellow').length;
   const oN = trees.filter(t => t.triage === 'Orange').length;
   const hfPoor = bothPoor(trees);
+  const cavityList = trees.filter(hasCavity);
+  const leanList = trees.filter(hasLean);
 
   return `
     <p class="note">檔案：${esc(fileLabel)}　共 ${trees.length} 棵</p>
@@ -423,6 +469,10 @@ function renderSingle(trees, fileLabel) {
     ${cards(poor, ['no', 'sp', 'overall', 'triage', 'h', 'agg'], '無 Overall Poor')}
     <h2>8. Health 與 Form 都是 Poor　${badge(hfPoor.length, false)}</h2>
     ${cards(hfPoor, ['no', 'sp', 'health', 'form', 'triage', 'overall'], '無 Health & Form 都是 Poor')}
+    <h2>9. Cavity　${badge(cavityList.length, false)}</h2>
+    ${cards(cavityList, ['no', 'sp', 'cavity', 'triage', 'overall'], '無 Cavity')}
+    <h2>10. Lean　${badge(leanList.length, false)}</h2>
+    ${cards(leanList, ['no', 'sp', 'lean', 'triage', 'overall'], '無 Lean')}
   `;
 }
 
@@ -501,10 +551,15 @@ function downloadChangedExcel() {
 }
 
 function renderCompare(treesA, treesB, nameOld, nameNew) {
+  const a = treesA.filter(t => !isOutOfCompare(t));
+  const b = treesB.filter(t => !isOutOfCompare(t));
+  const excludedA = treesA.length - a.length;
+  const excludedB = treesB.length - b.length;
+
   const mapA = new Map();
   const mapB = new Map();
-  treesA.forEach(t => mapA.set(normNo(t.no), t));
-  treesB.forEach(t => mapB.set(normNo(t.no), t));
+  a.forEach(t => mapA.set(normNo(t.no), t));
+  b.forEach(t => mapB.set(normNo(t.no), t));
 
   const onlyA = [];
   const onlyB = [];
@@ -528,7 +583,7 @@ function renderCompare(treesA, treesB, nameOld, nameNew) {
     if (diffs.length) changed.push({ no: tB.no, diffs, tA, tB });
   }
 
-  const hfPoor = bothPoor(treesB);
+  const hfPoor = bothPoor(b);
 
   lastChangedForExcel = changed;
 
@@ -538,9 +593,10 @@ function renderCompare(treesA, treesB, nameOld, nameNew) {
 
   return `
     <p class="note">對比：舊年「${esc(nameOld)}」↔ 新年「${esc(nameNew)}」</p>
+    <p class="note">對比已排除 Removed／Tree not inspect（舊年排除 ${excludedA}、新年排除 ${excludedB}）</p>
     <div class="kpis">
-      <div class="kpi"><b>${treesA.length}</b><span>舊年樹數</span></div>
-      <div class="kpi"><b>${treesB.length}</b><span>新年樹數</span></div>
+      <div class="kpi"><b>${a.length}</b><span>舊年樹數（對比）</span></div>
+      <div class="kpi"><b>${b.length}</b><span>新年樹數（對比）</span></div>
       <div class="kpi"><b>${onlyA.length}</b><span>只在舊年</span></div>
       <div class="kpi"><b>${onlyB.length}</b><span>只在新年</span></div>
       <div class="kpi"><b>${changed.length}</b><span>有變動</span></div>
