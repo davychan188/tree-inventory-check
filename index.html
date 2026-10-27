@@ -422,6 +422,8 @@ function hasLean(t) {
   return /\blean\b/i.test(treeBlob(t));
 }
 
+let lastSingleSummary = null;
+
 function renderSingle(trees, fileLabel) {
   const removed = trees.filter(t => /removed/i.test(t.reason));
   const active = trees.filter(t => !/removed/i.test(t.reason));
@@ -445,8 +447,8 @@ function renderSingle(trees, fileLabel) {
   const leanList = trees.filter(hasLean);
 
   const sections = [
-    { title: '1. Large tree 未標 Yellow / Orange', sheetName: '1 Large no Y/O', cols: ['no', 'sp', 'h', 'agg', 'triage', 'status'], list: miss },
-    { title: '1b. 非 Large（H<9 且 DBH<500）但 Triage 為 Yellow／Orange／Red', sheetName: '1b Small Y/O/R', cols: ['no', 'sp', 'h', 'agg', 'triage', 'status'], list: smallYor },
+    { title: '1. Large tree 未標 Yellow / Orange', sheetName: '1 Large no YO', cols: ['no', 'sp', 'h', 'agg', 'triage', 'status'], list: miss },
+    { title: '1b. 非 Large（H<9 且 DBH<500）但 Triage 為 Yellow／Orange／Red', sheetName: '1b Small YOR', cols: ['no', 'sp', 'h', 'agg', 'triage', 'status'], list: smallYor },
     { title: '2. Yellow Status 不是 Large Tree', sheetName: '2 Yellow not Large', cols: ['no', 'sp', 'status'], list: yBad },
     { title: '3. Orange Status 不是 Tree in Confined Site', sheetName: '3 Orange not Confined', cols: ['no', 'sp', 'status'], list: oBad },
     { title: '4. Yellow/Orange Remedial 不是 Form 2 / Others', sheetName: '4 Rem not Form2', cols: ['no', 'triage', 'rem'], list: badRem },
@@ -536,7 +538,6 @@ const COMPARE_FIELDS = [
 ];
 
 let lastChangedForExcel = [];
-let lastSingleSummary = null;
 
 function dispVal(v) {
   const t = s(v);
@@ -603,33 +604,41 @@ function treesToSheetRows(list, cols) {
   });
 }
 
+function safeSheetName(name) {
+  return s(name).replace(/[:\\/?*\[\]]/g, '-').slice(0, 31) || 'Sheet';
+}
+
 function downloadSingleSummary() {
   if (!lastSingleSummary) return;
-  const { fileLabel, counts, sections } = lastSingleSummary;
-  const summaryRows = [
-    { Item: '檔案', Count: fileLabel },
-    { Item: '總樹數', Count: counts.total },
-    { Item: '有效樹', Count: counts.active },
-    { Item: 'Removed', Count: counts.removed },
-    { Item: 'DBH ≥ 95', Count: counts.dbh95 },
-    { Item: 'Yellow', Count: counts.yellow },
-    { Item: 'Orange', Count: counts.orange },
-    { Item: 'Large (H≥9 / DBH≥500)', Count: counts.large },
-    { Item: 'Health & Form Poor', Count: counts.hfPoor },
-  ];
-  for (const sec of sections) {
-    summaryRows.push({ Item: sec.title, Count: sec.list.length });
+  try {
+    const { fileLabel, counts, sections } = lastSingleSummary;
+    const summaryRows = [
+      { Item: '檔案', Count: fileLabel },
+      { Item: '總樹數', Count: counts.total },
+      { Item: '有效樹', Count: counts.active },
+      { Item: 'Removed', Count: counts.removed },
+      { Item: 'DBH ≥ 95', Count: counts.dbh95 },
+      { Item: 'Yellow', Count: counts.yellow },
+      { Item: 'Orange', Count: counts.orange },
+      { Item: 'Large (H≥9 / DBH≥500)', Count: counts.large },
+      { Item: 'Health & Form Poor', Count: counts.hfPoor },
+    ];
+    for (const sec of sections) {
+      summaryRows.push({ Item: sec.title, Count: sec.list.length });
+    }
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summaryRows), 'Summary');
+    for (const sec of sections) {
+      if (!sec.list.length) continue;
+      const rows = treesToSheetRows(sec.list, sec.cols);
+      const name = safeSheetName(sec.sheetName);
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), name);
+    }
+    const base = s(fileLabel).replace(/\.[^.]+$/, '').replace(/[\\/:*?"<>|]/g, '_') || '單檔檢查';
+    XLSX.writeFile(wb, `${base}_summary.xlsx`);
+  } catch (err) {
+    alert('下載 Excel summary 失敗：' + (err && err.message ? err.message : err));
   }
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summaryRows), 'Summary');
-  for (const sec of sections) {
-    if (!sec.list.length) continue;
-    const rows = treesToSheetRows(sec.list, sec.cols);
-    const name = sec.sheetName.slice(0, 31);
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), name);
-  }
-  const base = s(fileLabel).replace(/\.[^.]+$/, '').replace(/[\\/:*?"<>|]/g, '_') || '單檔檢查';
-  XLSX.writeFile(wb, `${base}_summary.xlsx`);
 }
 
 
