@@ -479,8 +479,10 @@ function renderSingle(trees, fileLabel) {
   const hfPoor = bothPoor(trees);
   const cavityList = trees.filter(hasCavity);
   const leanList = trees.filter(hasLean);
-  const top5Species = countBySpecies(active).slice(0, 5);
-  const matureTrees = active.filter(t => t.agg > 500);
+  // Species summaries: exclude Removed / Tree not inspected / undersize (H<9 & DBH<500)
+  const forSpeciesStats = trees.filter(t => !isOutOfCompare(t) && (t.agg >= 500 || t.h >= 9));
+  const top5Species = countBySpecies(forSpeciesStats).slice(0, 5);
+  const matureTrees = trees.filter(t => !isOutOfCompare(t) && t.agg > 500);
   const matureBySpecies = countBySpecies(matureTrees);
 
   const sections = [
@@ -530,8 +532,10 @@ function renderSingle(trees, fileLabel) {
     </div>
     <div class="section-actions"><button type="button" class="btn-sm" id="btnDlSingleSummary">下載 Excel summary</button></div>
     <h2>Most common species (Top 5)　${badge(top5Species.length, false)}</h2>
+    <p class="note">已排除 Removed／Tree not inspected／undersize（H&lt;9 且 DBH&lt;500）</p>
     ${speciesCountTable(top5Species, '無物種資料')}
     <h2>Mature trees (DBH &gt;500mm)　${badge(matureTrees.length, false)}</h2>
+    <p class="note">已排除 Removed／Tree not inspected；只計 Agg. DBH &gt; 500mm</p>
     ${speciesCountTable(matureBySpecies, '無 Mature trees (DBH &gt;500mm)')}
     <h2>1. Large tree 未標 Yellow / Orange　${badge(miss.length)}</h2>
     ${excelList(miss, ['no', 'sp', 'h', 'agg', 'triage', 'status'])}
