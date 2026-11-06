@@ -123,6 +123,7 @@ const FIELD_LABELS = {
   reason: 'Reason',
   cavity: 'Cavity',
   lean: 'Lean',
+  planting: 'Planting location',
 };
 
 function updateButtons() {
@@ -250,6 +251,8 @@ function parseTrees(arrayBuffer) {
     const cavityIdx = findCol(headers, h => /cavity/i.test(h));
     const leanIdx = findCol(headers, h => /\blean\b/i.test(h));
     const remarksIdx = findCol(headers, h => /remarks?|defect/i.test(h));
+    let plantingIdx = findCol(headers, h => /planting\s*location/i.test(h));
+    if (plantingIdx < 0) plantingIdx = findCol(headers, h => /^location$/i.test(h));
     return rows.map(r => {
       const arr = headers.map((_, i) => r[headers[i]]);
       return {
@@ -271,6 +274,7 @@ function parseTrees(arrayBuffer) {
         cavity: cavityIdx >= 0 ? s(arr[cavityIdx]) : s(getHeaderVal(r, ['Cavity', 'Cavities'])),
         lean: leanIdx >= 0 ? s(arr[leanIdx]) : s(getHeaderVal(r, ['Lean', 'Leaning'])),
         remarks: remarksIdx >= 0 ? s(arr[remarksIdx]) : s(getHeaderVal(r, ['Remarks', 'Remark', 'Defect', 'Defects'])),
+        planting: plantingIdx >= 0 ? s(arr[plantingIdx]) : s(getHeaderVal(r, ['Planting Location', 'Planting location', 'Location'])),
       };
     });
   }
@@ -351,6 +355,7 @@ function parseTrees(arrayBuffer) {
       cavity: '',
       lean: '',
       remarks: '',
+      planting: '',
     });
   }
   return trees;
@@ -422,6 +427,11 @@ function hasLean(t) {
   return /\blean\b/i.test(treeBlob(t));
 }
 
+
+function isKerbPlanterConfined(v) {
+  return /kerb\s*planter\s*\(\s*confined\s*\)/i.test(s(v));
+}
+
 let lastSingleSummary = null;
 
 function renderSingle(trees, fileLabel) {
@@ -433,7 +443,7 @@ function renderSingle(trees, fileLabel) {
   // 高度 <9 且 Agg.DBH <500，但 Triage 為 Yellow / Orange / Red
   const smallYor = active.filter(t => t.h < 9 && t.agg < 500 && /^(Yellow|Orange|Red)$/i.test(t.triage));
   const yBad = trees.filter(t => t.triage === 'Yellow' && !/Large Tree/i.test(t.status));
-  const oBad = trees.filter(t => t.triage === 'Orange' && !/Confined/i.test(t.status));
+  const oBad = trees.filter(t => t.triage === 'Orange' && /Large\s*Tree/i.test(t.status) && !isKerbPlanterConfined(t.planting));
   const yo = trees.filter(t => ['Yellow', 'Orange'].includes(t.triage));
   const badRem = yo.filter(t => !['Form 2 Assessment', 'Others'].includes(t.rem));
   const badOth = yo.filter(t => t.rem === 'Others' && !/reinspection/i.test(t.others));
@@ -450,7 +460,7 @@ function renderSingle(trees, fileLabel) {
     { title: '1. Large tree 未標 Yellow / Orange', sheetName: '1 Large no YO', cols: ['no', 'sp', 'h', 'agg', 'triage', 'status'], list: miss },
     { title: '1b. 非 Large（H<9 且 DBH<500）但 Triage 為 Yellow／Orange／Red', sheetName: '1b Small YOR', cols: ['no', 'sp', 'h', 'agg', 'triage', 'status'], list: smallYor },
     { title: '2. Yellow Status 不是 Large Tree', sheetName: '2 Yellow not Large', cols: ['no', 'sp', 'status'], list: yBad },
-    { title: '3. Orange Status 不是 Tree in Confined Site', sheetName: '3 Orange not Confined', cols: ['no', 'sp', 'status'], list: oBad },
+    { title: '3. Orange + Large Tree 但 Planting location 不是 KERB PLANTER (CONFINED)', sheetName: '3 Orange Large not Kerb', cols: ['no', 'sp', 'status', 'planting'], list: oBad },
     { title: '4. Yellow/Orange Remedial 不是 Form 2 / Others', sheetName: '4 Rem not Form2', cols: ['no', 'triage', 'rem'], list: badRem },
     { title: '5. Others 不是 Reinspection within 12 months', sheetName: '5 Others not Reinsp', cols: ['no', 'others'], list: badOth },
     { title: '6. Removed 量度不是全 0', sheetName: '6 Removed not 0', cols: ['no', 'h', 'spread', 'agg', 'trunk'], list: remBad },
@@ -494,8 +504,8 @@ function renderSingle(trees, fileLabel) {
     ${excelList(smallYor, ['no', 'sp', 'h', 'agg', 'triage', 'status'], '無')}
     <h2>2. Yellow Status 不是 Large Tree　${badge(yBad.length)}</h2>
     ${excelList(yBad, ['no', 'sp', 'status'])}
-    <h2>3. Orange Status 不是 Tree in Confined Site　${badge(oBad.length)}</h2>
-    ${excelList(oBad, ['no', 'sp', 'status'])}
+    <h2>3. Orange + Large Tree 但 Planting location 不是 KERB PLANTER (CONFINED)　${badge(oBad.length)}</h2>
+    ${excelList(oBad, ['no', 'sp', 'status', 'planting'])}
     <h2>4. Yellow/Orange Remedial 不是 Form 2 / Others　${badge(badRem.length)}</h2>
     ${excelList(badRem, ['no', 'triage', 'rem'])}
     <h2>5. Others 不是 Reinspection within 12 months　${badge(badOth.length)}</h2>
