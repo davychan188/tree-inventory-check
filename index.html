@@ -479,6 +479,8 @@ function renderSingle(trees, fileLabel) {
   const hfPoor = bothPoor(trees);
   const cavityList = trees.filter(hasCavity);
   const leanList = trees.filter(hasLean);
+  // Tree not inspected Reason / Removed / not inspect (same exclusion as compare)
+  const notInspectedList = trees.filter(isOutOfCompare);
   // Top 5: all trees except Removed / Tree not inspected (via reason); no H/DBH filter
   const forTop5Species = trees.filter(t => !isOutOfCompare(t));
   const top5Species = countBySpecies(forTop5Species).slice(0, 5);
@@ -498,6 +500,7 @@ function renderSingle(trees, fileLabel) {
     { title: '8. Health 與 Form 都是 Poor', sheetName: '8 Health Form Poor', cols: ['no', 'sp', 'health', 'form', 'triage', 'overall'], list: hfPoor },
     { title: '9. Cavity', sheetName: '9 Cavity', cols: ['no', 'sp', 'cavity', 'triage', 'overall'], list: cavityList },
     { title: '10. Lean', sheetName: '10 Lean', cols: ['no', 'sp', 'lean', 'triage', 'overall'], list: leanList },
+    { title: '11. Tree not inspected', sheetName: '11 Not inspected', cols: ['no', 'sp', 'reason', 'status', 'triage'], list: notInspectedList },
   ];
 
   lastSingleSummary = {
@@ -561,6 +564,9 @@ function renderSingle(trees, fileLabel) {
     ${excelList(cavityList, ['no', 'sp', 'cavity', 'triage', 'overall'], '無 Cavity')}
     <h2>10. Lean　${badge(leanList.length, false)}</h2>
     ${excelList(leanList, ['no', 'sp', 'lean', 'triage', 'overall'], '無 Lean')}
+    <h2>11. Tree not inspected　${badge(notInspectedList.length, false)}</h2>
+    <p class="note">列出 Tree not inspected Reason 有內容，或 Status／Overall／Reason 含 not inspect／Removed 嘅樹號</p>
+    ${excelList(notInspectedList, ['no', 'sp', 'reason', 'status', 'triage'], '無 Tree not inspected')}
   `;
 }
 
