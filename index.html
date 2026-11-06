@@ -390,6 +390,30 @@ function excelList(list, cols, emptyMsg = '無') {
 }
 
 
+
+function countBySpecies(trees) {
+  const map = new Map();
+  for (const t of trees) {
+    const sp = s(t.sp);
+    if (!sp) continue; // skip empty for species summaries
+    map.set(sp, (map.get(sp) || 0) + 1);
+  }
+  return [...map.entries()]
+    .map(([species, qty]) => ({ species, qty }))
+    .sort((a, b) => b.qty - a.qty || a.species.localeCompare(b.species));
+}
+
+function speciesCountTable(rows, emptyMsg = '無') {
+  const th = `<th class="corner">Species</th><th>Quantity (no)</th>`;
+  if (!rows.length) {
+    return `<div class="table-wrap"><table class="excel"><thead><tr>${th}</tr></thead><tbody><tr><td colspan="2">${esc(emptyMsg)}</td></tr></tbody></table></div>`;
+  }
+  const body = rows.map(r =>
+    `<tr><td class="tree-no">${esc(r.species)}</td><td>${esc(r.qty)}</td></tr>`
+  ).join('');
+  return `<div class="table-wrap"><table class="excel"><thead><tr>${th}</tr></thead><tbody>${body}</tbody></table></div>`;
+}
+
 function bothPoor(trees) {
   return trees.filter(t => /^poor$/i.test(t.health) && /^poor$/i.test(t.form));
 }
@@ -455,6 +479,9 @@ function renderSingle(trees, fileLabel) {
   const hfPoor = bothPoor(trees);
   const cavityList = trees.filter(hasCavity);
   const leanList = trees.filter(hasLean);
+  const top5Species = countBySpecies(active).slice(0, 5);
+  const matureTrees = active.filter(t => t.agg > 500);
+  const matureBySpecies = countBySpecies(matureTrees);
 
   const sections = [
     { title: '1. Large tree 未標 Yellow / Orange', sheetName: '1 Large no YO', cols: ['no', 'sp', 'h', 'agg', 'triage', 'status'], list: miss },
@@ -481,7 +508,11 @@ function renderSingle(trees, fileLabel) {
       orange: oN,
       large: large.length,
       hfPoor: hfPoor.length,
+      mature: matureTrees.length,
+      matureSpecies: matureBySpecies.length,
     },
+    top5Species,
+    matureBySpecies,
     sections,
   };
 
@@ -498,6 +529,10 @@ function renderSingle(trees, fileLabel) {
       <div class="kpi"><b>${hfPoor.length}</b><span>Health & Form Poor</span></div>
     </div>
     <div class="section-actions"><button type="button" class="btn-sm" id="btnDlSingleSummary">下載 Excel summary</button></div>
+    <h2>Most common species (Top 5)　${badge(top5Species.length, false)}</h2>
+    ${speciesCountTable(top5Species, '無物種資料')}
+    <h2>Mature trees (DBH &gt;500mm)　${badge(matureTrees.length, false)}</h2>
+    ${speciesCountTable(matureBySpecies, '無 Mature trees (DBH &gt;500mm)')}
     <h2>1. Large tree 未標 Yellow / Orange　${badge(miss.length)}</h2>
     ${excelList(miss, ['no', 'sp', 'h', 'agg', 'triage', 'status'])}
     <h2>1b. 非 Large（H&lt;9 且 DBH&lt;500）但 Triage 為 Yellow／Orange／Red　${badge(smallYor.length)}</h2>
@@ -621,7 +656,7 @@ function safeSheetName(name) {
 function downloadSingleSummary() {
   if (!lastSingleSummary) return;
   try {
-    const { fileLabel, counts, sections } = lastSingleSummary;
+    const { fileLabel, counts, sections, top5Species = [], matureBySpecies = [] } = lastSingleSummary;
     const summaryRows = [
       { Item: '檔案', Count: fileLabel },
       { Item: '總樹數', Count: counts.total },
@@ -632,12 +667,25 @@ function downloadSingleSummary() {
       { Item: 'Orange', Count: counts.orange },
       { Item: 'Large (H≥9 / DBH≥500)', Count: counts.large },
       { Item: 'Health & Form Poor', Count: counts.hfPoor },
+      { Item: 'Mature trees (DBH >500mm)', Count: counts.mature ?? 0 },
+      { Item: 'Mature species count', Count: counts.matureSpecies ?? 0 },
     ];
+    top5Species.forEach((r, i) => {
+      summaryRows.push({ Item: `Top ${i + 1} Species`, Count: `${r.species} (${r.qty})` });
+    });
     for (const sec of sections) {
       summaryRows.push({ Item: sec.title, Count: sec.list.length });
     }
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summaryRows), 'Summary');
+    if (top5Species.length) {
+      const topRows = top5Species.map(r => ({ Species: r.species, 'Quantity (no)': r.qty }));
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(topRows), safeSheetName('Top 5 Species'));
+    }
+    if (matureBySpecies.length) {
+      const matRows = matureBySpecies.map(r => ({ Species: r.species, 'Quantity (no)': r.qty }));
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(matRows), safeSheetName('Mature DBH gt 500'));
+    }
     for (const sec of sections) {
       if (!sec.list.length) continue;
       const rows = treesToSheetRows(sec.list, sec.cols);
