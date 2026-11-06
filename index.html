@@ -429,6 +429,16 @@ function isOutOfCompare(t) {
   return false;
 }
 
+/** Section 11 only: Tree not inspected, excluding Removed */
+function isTreeNotInspected(t) {
+  const r = s(t.reason);
+  const blob = `${r} ${s(t.status)} ${s(t.overall)}`;
+  if (/removed/i.test(blob)) return false;
+  if (/not\s*inspect/i.test(blob)) return true;
+  if (r !== '') return true;
+  return false;
+}
+
 function isTruthyFlag(v) {
   const t = s(v);
   if (t === '') return false;
@@ -479,8 +489,8 @@ function renderSingle(trees, fileLabel) {
   const hfPoor = bothPoor(trees);
   const cavityList = trees.filter(hasCavity);
   const leanList = trees.filter(hasLean);
-  // Tree not inspected Reason / Removed / not inspect (same exclusion as compare)
-  const notInspectedList = trees.filter(isOutOfCompare);
+  // Tree not inspected only (exclude Removed; Top5/Mature/compare still use isOutOfCompare)
+  const notInspectedList = trees.filter(isTreeNotInspected);
   // Top 5: all trees except Removed / Tree not inspected (via reason); no H/DBH filter
   const forTop5Species = trees.filter(t => !isOutOfCompare(t));
   const top5Species = countBySpecies(forTop5Species).slice(0, 5);
@@ -565,7 +575,7 @@ function renderSingle(trees, fileLabel) {
     <h2>10. Lean　${badge(leanList.length, false)}</h2>
     ${excelList(leanList, ['no', 'sp', 'lean', 'triage', 'overall'], '無 Lean')}
     <h2>11. Tree not inspected　${badge(notInspectedList.length, false)}</h2>
-    <p class="note">列出 Tree not inspected Reason 有內容，或 Status／Overall／Reason 含 not inspect／Removed 嘅樹號</p>
+    <p class="note">列出 Tree not inspected Reason 有內容，或 Status／Overall／Reason 含 not inspect 嘅樹號（唔包括 Removed）</p>
     ${excelList(notInspectedList, ['no', 'sp', 'reason', 'status', 'triage'], '無 Tree not inspected')}
   `;
 }
