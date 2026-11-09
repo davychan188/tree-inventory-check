@@ -5,6 +5,7 @@
 <title>Tree Inventory Auto Check</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
 <style>
 :root{--g:#14532d;--bg:#f3f6f3;--line:#d5e0d5;--ok:#166534;--bad:#b91c1c}
 *{box-sizing:border-box}
@@ -745,58 +746,258 @@ function safeSheetName(name) {
   return s(name).replace(/[:\\/?*\[\]]/g, '-').slice(0, 31) || 'Sheet';
 }
 
-function downloadSingleSummary() {
+const EXCEL_BORDER = { style: 'thin', color: { argb: 'FFB0BEC5' } };
+const EXCEL_THIN_BORDER = { top: EXCEL_BORDER, left: EXCEL_BORDER, bottom: EXCEL_BORDER, right: EXCEL_BORDER };
+const CHECK_SHEET_HEADER_COLORS = {
+  '1 Large no YO': 'F57C00',
+  '1b Small YOR': 'F9A825',
+  '2 Yellow not Large': 'F9A825',
+  '3 Orange Large not Kerb': 'E65100',
+  '4 Rem not Form2': 'E65100',
+  '5 Others not Reinsp': 'C62828',
+  '6 Removed not 0': 'C62828',
+  '7 Overall Poor': 'AD1457',
+  '8 Health Form Poor': 'AD1457',
+  '9 Cavity': 'AD1457',
+  '10 Lean': '455A64',
+  '11 Not inspected': '455A64',
+};
+const CHECK_CENTER_FIELDS = new Set(['h', 'agg', 'spread', 'trunk']);
+const COPY_LIST_HEADER = '可複製 Tree No 清單';
+
+function excelArgb(hex) {
+  let h = String(hex || '').replace(/^#/, '').toUpperCase();
+  if (h.length === 8) h = h.slice(-6);
+  if (h.length !== 6) h = h.padStart(6, '0').slice(-6);
+  return 'FF' + h;
+}
+
+function styleHeaderCell(cell, fillHex) {
+  cell.font = { name: 'Arial', size: 11, bold: true, color: { argb: 'FFFFFFFF' } };
+  cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: excelArgb(fillHex) } };
+  cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+  cell.border = EXCEL_THIN_BORDER;
+}
+
+function styleDataCell(cell, { align = 'left', bold = false, fillHex = null, numFmt = null } = {}) {
+  cell.font = { name: 'Arial', size: 10, bold: !!bold, color: { argb: 'FF000000' } };
+  cell.alignment = { horizontal: align, vertical: 'middle', wrapText: !!fillHex };
+  cell.border = EXCEL_THIN_BORDER;
+  if (fillHex) {
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: excelArgb(fillHex) } };
+  }
+  if (numFmt) cell.numFmt = numFmt;
+}
+
+function colWidthForField(key) {
+  if (key === 'no') return 14;
+  if (key === 'sp') return 50;
+  if (key === 'planting') return 20;
+  if (key === 'status') return 16;
+  if (key === 'reason') return 18;
+  if (key === 'rem' || key === 'others') return 20;
+  return 13;
+}
+
+function triggerXlsxDownload(buffer, filename) {
+  const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+async function downloadSingleSummary() {
   if (!lastSingleSummary) return;
+  if (typeof ExcelJS === 'undefined' || !ExcelJS.Workbook) {
+    alert('無法載入 ExcelJS，請刷新頁面後再試下載 Excel summary。');
+    return;
+  }
   try {
     const { fileLabel, counts, sections, top5Species = [], matureBySpecies = [], form2TriageRows = [] } = lastSingleSummary;
-    const summaryRows = [
-      { Item: '檔案', Count: fileLabel },
-      { Item: '總樹數', Count: counts.total },
-      { Item: '有效樹', Count: counts.active },
-      { Item: 'Removed', Count: counts.removed },
-      { Item: 'DBH ≥ 95', Count: counts.dbh95 },
-      { Item: 'Yellow', Count: counts.yellow },
-      { Item: 'Orange', Count: counts.orange },
-      { Item: 'Large (H≥9 / DBH≥500)', Count: counts.large },
-      { Item: 'Health & Form Poor', Count: counts.hfPoor },
-      { Item: 'Mature trees (DBH >500mm)', Count: counts.mature ?? 0 },
-      { Item: 'Mature species count', Count: counts.matureSpecies ?? 0 },
-      { Item: 'Trees in FORM 2', Count: counts.form2 ?? 0 },
-    ];
-    top5Species.forEach((r, i) => {
-      summaryRows.push({ Item: `Top ${i + 1} Species`, Count: `${r.species} (${r.qty})` });
-    });
-    for (const sec of sections) {
-      summaryRows.push({ Item: sec.title, Count: sec.list.length });
+    const wb = new ExcelJS.Workbook();
+    wb.creator = 'Tree Inventory Auto Check';
+
+    // 1. Summary
+    {
+      const ws = wb.addWorksheet('Summary', { views: [{ state: 'frozen', ySplit: 1 }] });
+      ws.getRow(1).height = 22;
+      styleHeaderCell(ws.getCell(1, 1), '1F4E79');
+      styleHeaderCell(ws.getCell(1, 2), '1F4E79');
+      ws.getCell(1, 1).value = 'Item';
+      ws.getCell(1, 2).value = 'Count';
+      const summaryRows = [
+        ['檔案', fileLabel],
+        ['總樹數', counts.total],
+        ['有效樹', counts.active],
+        ['Removed', counts.removed],
+        ['DBH ≥ 95', counts.dbh95],
+        ['Yellow', counts.yellow],
+        ['Orange', counts.orange],
+        ['Large (H≥9 / DBH≥500)', counts.large],
+        ['Health & Form Poor', counts.hfPoor],
+        ['Mature trees (DBH >500mm)', counts.mature ?? 0],
+        ['Mature species count', counts.matureSpecies ?? 0],
+        ['Trees in FORM 2', counts.form2 ?? 0],
+      ];
+      top5Species.forEach((r, i) => {
+        summaryRows.push([`Top ${i + 1} Species`, `${r.species} (${r.qty})`]);
+      });
+      for (const sec of sections) {
+        summaryRows.push([sec.title, sec.list.length]);
+      }
+      summaryRows.forEach((pair, i) => {
+        const r = i + 2;
+        const itemCell = ws.getCell(r, 1);
+        const countCell = ws.getCell(r, 2);
+        itemCell.value = pair[0];
+        countCell.value = pair[1];
+        const countIsNum = typeof pair[1] === 'number';
+        styleDataCell(itemCell, { align: 'left' });
+        styleDataCell(countCell, { align: countIsNum ? 'center' : 'left' });
+      });
+      ws.getColumn(1).width = 75;
+      ws.getColumn(2).width = 74;
     }
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summaryRows), 'Summary');
+
+    // 2. Top 5 Species
     if (top5Species.length) {
-      const topRows = top5Species.map(r => ({ Species: r.species, 'Quantity (no)': r.qty }));
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(topRows), safeSheetName('Top 5 Species'));
+      const ws = wb.addWorksheet(safeSheetName('Top 5 Species'), { views: [{ state: 'frozen', ySplit: 1 }] });
+      ws.getRow(1).height = 22;
+      styleHeaderCell(ws.getCell(1, 1), '2E7D32');
+      styleHeaderCell(ws.getCell(1, 2), '2E7D32');
+      ws.getCell(1, 1).value = 'Species';
+      ws.getCell(1, 2).value = 'Quantity (no)';
+      top5Species.forEach((row, i) => {
+        const r = i + 2;
+        ws.getCell(r, 1).value = row.species;
+        ws.getCell(r, 2).value = row.qty;
+        styleDataCell(ws.getCell(r, 1), { align: 'left' });
+        styleDataCell(ws.getCell(r, 2), { align: 'center' });
+      });
+      ws.getColumn(1).width = 69;
+      ws.getColumn(2).width = 16;
     }
+
+    // 3. Mature DBH gt 500
     if (matureBySpecies.length) {
-      const matRows = matureBySpecies.map(r => ({ Species: r.species, 'Quantity (no)': r.qty }));
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(matRows), safeSheetName('Mature DBH gt 500'));
+      const ws = wb.addWorksheet(safeSheetName('Mature DBH gt 500'), { views: [{ state: 'frozen', ySplit: 1 }] });
+      ws.getRow(1).height = 22;
+      styleHeaderCell(ws.getCell(1, 1), '00695C');
+      styleHeaderCell(ws.getCell(1, 2), '00695C');
+      ws.getCell(1, 1).value = 'Species';
+      ws.getCell(1, 2).value = 'Quantity (no)';
+      matureBySpecies.forEach((row, i) => {
+        const r = i + 2;
+        ws.getCell(r, 1).value = row.species;
+        ws.getCell(r, 2).value = row.qty;
+        styleDataCell(ws.getCell(r, 1), { align: 'left' });
+        styleDataCell(ws.getCell(r, 2), { align: 'center' });
+      });
+      ws.getColumn(1).width = 69;
+      ws.getColumn(2).width = 16;
     }
+
+    // 4. FORM 2 triage
     if (form2TriageRows.length) {
-      const form2Rows = form2TriageRows.map(r => ({
-        'TRIAGE Classification': r.triage,
-        Status: r.status === '' ? '—' : r.status,
-        'Sub-Total (no)': r.subTotal,
-        'With mitigation works': r.withMit,
-        'No mitigation work': r.noMit,
-      }));
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(form2Rows), safeSheetName('FORM 2 triage'));
+      const ws = wb.addWorksheet(safeSheetName('FORM 2 triage'), { views: [{ state: 'frozen', ySplit: 1 }] });
+      ws.getRow(1).height = 22;
+      const headers = ['TRIAGE Classification', 'Status', 'Sub-Total (no)', 'With mitigation works', 'No mitigation work'];
+      headers.forEach((h, i) => {
+        const cell = ws.getCell(1, i + 1);
+        cell.value = h;
+        styleHeaderCell(cell, '6A1B9A');
+      });
+      form2TriageRows.forEach((row, i) => {
+        const r = i + 2;
+        const vals = [
+          row.triage,
+          row.status === '' || row.status == null ? '—' : row.status,
+          row.subTotal,
+          row.withMit,
+          row.noMit,
+        ];
+        vals.forEach((v, ci) => {
+          const cell = ws.getCell(r, ci + 1);
+          cell.value = v;
+          styleDataCell(cell, { align: ci >= 2 ? 'center' : 'left' });
+        });
+      });
+      ws.getColumn(1).width = 24;
+      ws.getColumn(2).width = 13;
+      ws.getColumn(3).width = 17;
+      ws.getColumn(4).width = 24;
+      ws.getColumn(5).width = 21;
     }
+
+    // 5+. Non-empty check sheets
     for (const sec of sections) {
       if (!sec.list.length) continue;
-      const rows = treesToSheetRows(sec.list, sec.cols);
       const name = safeSheetName(sec.sheetName);
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), name);
+      const headerFill = CHECK_SHEET_HEADER_COLORS[sec.sheetName] || 'F57C00';
+      const ws = wb.addWorksheet(name, { views: [{ state: 'frozen', ySplit: 1 }] });
+      ws.getRow(1).height = 22;
+      const cols = sec.cols;
+      cols.forEach((key, i) => {
+        const cell = ws.getCell(1, i + 1);
+        cell.value = FIELD_LABELS[key] || key;
+        styleHeaderCell(cell, headerFill);
+      });
+      // Column G left empty; H = copy list
+      const hCol = 8;
+      const hHeader = ws.getCell(1, hCol);
+      hHeader.value = COPY_LIST_HEADER;
+      styleHeaderCell(hHeader, 'F57C00');
+
+      sec.list.forEach((t, i) => {
+        const r = i + 2;
+        cols.forEach((key, ci) => {
+          const cell = ws.getCell(r, ci + 1);
+          cell.value = cellVal(t, key);
+          const isNo = key === 'no';
+          const center = CHECK_CENTER_FIELDS.has(key);
+          styleDataCell(cell, {
+            align: center ? 'center' : 'left',
+            numFmt: isNo ? '@' : null,
+          });
+        });
+      });
+
+      const treeNos = sec.list.map(t => s(t.no)).filter(Boolean);
+      const copyText = treeNos.join(', ');
+      const maxRow = Math.max(2, sec.list.length + 1);
+      const hCell = ws.getCell(2, hCol);
+      hCell.value = copyText;
+      styleDataCell(hCell, { align: 'left', bold: true, fillHex: 'FFF9C4', numFmt: '@' });
+      hCell.alignment = { horizontal: 'left', vertical: 'middle', wrapText: true };
+      if (maxRow >= 3) {
+        const mergeEnd = Math.min(maxRow, 5);
+        ws.mergeCells(2, hCol, mergeEnd, hCol);
+      }
+
+      cols.forEach((key, i) => {
+        ws.getColumn(i + 1).width = colWidthForField(key);
+      });
+      // bump Species width if many long names
+      const spIdx = cols.indexOf('sp');
+      if (spIdx >= 0) {
+        const maxLen = Math.max(
+          FIELD_LABELS.sp.length,
+          ...sec.list.map(t => s(t.sp).length)
+        );
+        ws.getColumn(spIdx + 1).width = Math.min(69, Math.max(50, Math.ceil(maxLen * 0.9)));
+      }
+      ws.getColumn(7).width = 13;
+      ws.getColumn(8).width = 80;
     }
+
     const base = s(fileLabel).replace(/\.[^.]+$/, '').replace(/[\\/:*?"<>|]/g, '_') || '單檔檢查';
-    XLSX.writeFile(wb, `${base}_summary.xlsx`);
+    const buffer = await wb.xlsx.writeBuffer();
+    triggerXlsxDownload(buffer, `${base}_summary.xlsx`);
   } catch (err) {
     alert('下載 Excel summary 失敗：' + (err && err.message ? err.message : err));
   }
