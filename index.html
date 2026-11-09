@@ -439,6 +439,70 @@ function isTreeNotInspected(t) {
   return false;
 }
 
+
+function isForm2(t) {
+  return /form\s*2/i.test(s(t.rem));
+}
+
+function triageBucket(t) {
+  const tri = s(t.triage);
+  if (/black/i.test(tri)) return 'Black';
+  if (/red/i.test(tri)) return 'Red';
+  if (/orange/i.test(tri)) return 'Orange';
+  if (/yellow/i.test(tri)) return 'Yellow';
+  return 'Non-coloured';
+}
+
+function buildForm2TriageSummary(trees) {
+  const order = ['Black', 'Red', 'Orange', 'Yellow', 'Non-coloured'];
+  const buckets = Object.fromEntries(order.map(k => [k, { withMit: 0, noMit: 0 }]));
+  for (const t of trees) {
+    if (!isForm2(t)) continue;
+    const b = triageBucket(t);
+    if (s(t.others) !== '') buckets[b].withMit++;
+    else buckets[b].noMit++;
+  }
+  const rows = order.map(triage => {
+    const withMit = buckets[triage].withMit;
+    const noMit = buckets[triage].noMit;
+    return {
+      triage,
+      status: '',
+      subTotal: withMit + noMit,
+      withMit,
+      noMit,
+    };
+  });
+  const totalWith = rows.reduce((a, r) => a + r.withMit, 0);
+  const totalNo = rows.reduce((a, r) => a + r.noMit, 0);
+  rows.push({
+    triage: 'Total no. of FORM 2',
+    status: '',
+    subTotal: totalWith + totalNo,
+    withMit: totalWith,
+    noMit: totalNo,
+    isTotal: true,
+  });
+  return rows;
+}
+
+function form2TriageTable(rows) {
+  const th = [
+    'TRIAGE Classification',
+    'Status',
+    'Sub-Total (no)',
+    'With mitigation works',
+    'No mitigation work',
+  ].map((label, i) => `<th${i === 0 ? ' class="corner"' : ''}>${esc(label)}</th>`).join('');
+  const body = rows.map(r => {
+    const statusCell = r.status === '' ? '—' : esc(r.status);
+    const cls = r.isTotal ? ' style="font-weight:700"' : '';
+    return `<tr${cls}><td class="tree-no">${esc(r.triage)}</td><td>${statusCell}</td><td>${r.subTotal}</td><td>${r.withMit}</td><td>${r.noMit}</td></tr>`;
+  }).join('');
+  return `<div class="table-wrap"><table class="excel"><thead><tr>${th}</tr></thead><tbody>${body}</tbody></table></div>`;
+}
+
+
 function isTruthyFlag(v) {
   const t = s(v);
   if (t === '') return false;
@@ -497,6 +561,8 @@ function renderSingle(trees, fileLabel) {
   // Mature: DBH >500 and exclude not inspected / removed
   const matureTrees = trees.filter(t => !isOutOfCompare(t) && t.agg > 500);
   const matureBySpecies = countBySpecies(matureTrees);
+  const form2TriageRows = buildForm2TriageSummary(trees);
+  const form2Total = form2TriageRows.find(r => r.isTotal)?.subTotal ?? 0;
 
   const sections = [
     { title: '1. Large tree 未標 Yellow / Orange', sheetName: '1 Large no YO', cols: ['no', 'sp', 'h', 'agg', 'triage', 'status'], list: miss },
@@ -526,9 +592,11 @@ function renderSingle(trees, fileLabel) {
       hfPoor: hfPoor.length,
       mature: matureTrees.length,
       matureSpecies: matureBySpecies.length,
+      form2: form2Total,
     },
     top5Species,
     matureBySpecies,
+    form2TriageRows,
     sections,
   };
 
@@ -551,6 +619,9 @@ function renderSingle(trees, fileLabel) {
     <h2>Mature trees (DBH &gt;500mm)　${badge(matureTrees.length, false)}</h2>
     <p class="note">已排除 Removed／Tree not inspected；只計 Agg. DBH &gt; 500mm</p>
     ${speciesCountTable(matureBySpecies, '無 Mature trees (DBH &gt;500mm)')}
+    <h2>Trees in FORM 2　${badge(form2Total, false)}</h2>
+    <p class="note">Form 2 = Remedial Action 含 Form 2；mitigation = Remedial Action (Others) 有內容；Non-coloured = 無 Black/Red/Orange/Yellow triage</p>
+    ${form2TriageTable(form2TriageRows)}
     <h2>1. Large tree 未標 Yellow / Orange　${badge(miss.length)}</h2>
     ${excelList(miss, ['no', 'sp', 'h', 'agg', 'triage', 'status'])}
     <h2>1b. 非 Large（H&lt;9 且 DBH&lt;500）但 Triage 為 Yellow／Orange／Red　${badge(smallYor.length)}</h2>
@@ -677,7 +748,7 @@ function safeSheetName(name) {
 function downloadSingleSummary() {
   if (!lastSingleSummary) return;
   try {
-    const { fileLabel, counts, sections, top5Species = [], matureBySpecies = [] } = lastSingleSummary;
+    const { fileLabel, counts, sections, top5Species = [], matureBySpecies = [], form2TriageRows = [] } = lastSingleSummary;
     const summaryRows = [
       { Item: '檔案', Count: fileLabel },
       { Item: '總樹數', Count: counts.total },
@@ -690,6 +761,7 @@ function downloadSingleSummary() {
       { Item: 'Health & Form Poor', Count: counts.hfPoor },
       { Item: 'Mature trees (DBH >500mm)', Count: counts.mature ?? 0 },
       { Item: 'Mature species count', Count: counts.matureSpecies ?? 0 },
+      { Item: 'Trees in FORM 2', Count: counts.form2 ?? 0 },
     ];
     top5Species.forEach((r, i) => {
       summaryRows.push({ Item: `Top ${i + 1} Species`, Count: `${r.species} (${r.qty})` });
@@ -706,6 +778,16 @@ function downloadSingleSummary() {
     if (matureBySpecies.length) {
       const matRows = matureBySpecies.map(r => ({ Species: r.species, 'Quantity (no)': r.qty }));
       XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(matRows), safeSheetName('Mature DBH gt 500'));
+    }
+    if (form2TriageRows.length) {
+      const form2Rows = form2TriageRows.map(r => ({
+        'TRIAGE Classification': r.triage,
+        Status: r.status === '' ? '—' : r.status,
+        'Sub-Total (no)': r.subTotal,
+        'With mitigation works': r.withMit,
+        'No mitigation work': r.noMit,
+      }));
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(form2Rows), safeSheetName('FORM 2 triage'));
     }
     for (const sec of sections) {
       if (!sec.list.length) continue;
