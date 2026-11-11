@@ -122,6 +122,8 @@ const FIELD_LABELS = {
   health: 'Health',
   form: 'Form',
   reason: 'Reason',
+  remarks: 'Remarks',
+  form2Attached: 'Form2 Attached',
   cavity: 'Cavity',
   lean: 'Lean',
   planting: 'Planting location',
@@ -252,6 +254,8 @@ function parseTrees(arrayBuffer) {
     const cavityIdx = findCol(headers, h => /cavity/i.test(h));
     const leanIdx = findCol(headers, h => /\blean\b/i.test(h));
     const remarksIdx = findCol(headers, h => /remarks?|defect/i.test(h));
+    const reasonOtherIdx = findCol(headers, h => /not\s*inspected.*other\s*reason/i.test(h) || /other\s*reason/i.test(h));
+    const form2AttIdx = findCol(headers, h => /form\s*2\s*attached/i.test(h) || /form2\s*attached/i.test(h));
     let plantingIdx = findCol(headers, h => /planting\s*location/i.test(h));
     if (plantingIdx < 0) plantingIdx = findCol(headers, h => /^location$/i.test(h));
     return rows.map(r => {
@@ -274,7 +278,9 @@ function parseTrees(arrayBuffer) {
         form: formIdx >= 0 ? s(arr[formIdx]) : s(getHeaderVal(r, ['Form Condition', 'Form Conditions', 'Form', 'Structural Condition'])),
         cavity: cavityIdx >= 0 ? s(arr[cavityIdx]) : s(getHeaderVal(r, ['Cavity', 'Cavities'])),
         lean: leanIdx >= 0 ? s(arr[leanIdx]) : s(getHeaderVal(r, ['Lean', 'Leaning'])),
-        remarks: remarksIdx >= 0 ? s(arr[remarksIdx]) : s(getHeaderVal(r, ['Remarks', 'Remark', 'Defect', 'Defects'])),
+        remarks: (remarksIdx >= 0 ? s(arr[remarksIdx]) : s(getHeaderVal(r, ['Remarks', 'Remark', 'Defect', 'Defects'])))
+          || (reasonOtherIdx >= 0 ? s(arr[reasonOtherIdx]) : s(getHeaderVal(r, ['Tree not inspected (Other reason)', 'Tree not inspected Other reason']))),
+        form2Attached: form2AttIdx >= 0 ? s(arr[form2AttIdx]) : s(getHeaderVal(r, ['Form2 Attached', 'Form 2 Attached', 'Form 2 attached'])),
         planting: plantingIdx >= 0 ? s(arr[plantingIdx]) : s(getHeaderVal(r, ['Planting Location', 'Planting location', 'Location'])),
       };
     });
@@ -356,6 +362,7 @@ function parseTrees(arrayBuffer) {
       cavity: '',
       lean: '',
       remarks: '',
+      form2Attached: '',
       planting: '',
     });
   }
@@ -433,11 +440,17 @@ function isOutOfCompare(t) {
 /** Section 11 only: Tree not inspected, excluding Removed */
 function isTreeNotInspected(t) {
   const r = s(t.reason);
-  const blob = `${r} ${s(t.status)} ${s(t.overall)}`;
+  const remarks = s(t.remarks);
+  const blob = `${r} ${remarks} ${s(t.status)} ${s(t.overall)}`;
   if (/removed/i.test(blob)) return false;
   if (/not\s*inspect/i.test(blob)) return true;
   if (r !== '') return true;
+  if (remarks !== '') return true;
   return false;
+}
+
+function hasForm2Attached(t) {
+  return isTruthyFlag(t.form2Attached);
 }
 
 
@@ -555,7 +568,11 @@ function renderSingle(trees, fileLabel) {
   const cavityList = trees.filter(hasCavity);
   const leanList = trees.filter(hasLean);
   // Tree not inspected only (exclude Removed; Top5/Mature/compare still use isOutOfCompare)
-  const notInspectedList = trees.filter(isTreeNotInspected);
+  // Also include: Remedial Action is Form 2 AND Form2 Attached has data
+  const notInspectedList = trees.filter(t =>
+    isTreeNotInspected(t) || (isForm2(t) && hasForm2Attached(t) && !/removed/i.test(`${s(t.reason)} ${s(t.status)} ${s(t.overall)}`))
+  );
+  const form2MissingAtt = trees.filter(t => isForm2(t) && !hasForm2Attached(t) && !/removed/i.test(`${s(t.reason)} ${s(t.status)} ${s(t.overall)}`));
   // Top 5: all trees except Removed / Tree not inspected (via reason); no H/DBH filter
   const forTop5Species = trees.filter(t => !isOutOfCompare(t));
   const top5Species = countBySpecies(forTop5Species).slice(0, 5);
@@ -577,7 +594,8 @@ function renderSingle(trees, fileLabel) {
     { title: '8. Health 與 Form 都是 Poor', sheetName: '8 Health Form Poor', cols: ['no', 'sp', 'health', 'form', 'triage', 'overall'], list: hfPoor },
     { title: '9. Cavity', sheetName: '9 Cavity', cols: ['no', 'sp', 'cavity', 'triage', 'overall'], list: cavityList },
     { title: '10. Lean', sheetName: '10 Lean', cols: ['no', 'sp', 'lean', 'triage', 'overall'], list: leanList },
-    { title: '11. Tree not inspected', sheetName: '11 Not inspected', cols: ['no', 'sp', 'reason', 'status', 'triage'], list: notInspectedList },
+    { title: '11. Tree not inspected', sheetName: '11 Not inspected', cols: ['no', 'sp', 'reason', 'remarks', 'rem', 'form2Attached', 'status', 'triage'], list: notInspectedList },
+    { title: '12. Form 2 Assessment 但 Form2 Attached 無資料', sheetName: '12 Form2 no attach', cols: ['no', 'sp', 'rem', 'form2Attached', 'triage', 'status'], list: form2MissingAtt },
   ];
 
   lastSingleSummary = {
@@ -647,8 +665,11 @@ function renderSingle(trees, fileLabel) {
     <h2>10. Lean　${badge(leanList.length, false)}</h2>
     ${excelList(leanList, ['no', 'sp', 'lean', 'triage', 'overall'], '無 Lean')}
     <h2>11. Tree not inspected　${badge(notInspectedList.length, false)}</h2>
-    <p class="note">列出 Tree not inspected Reason 有內容，或 Status／Overall／Reason 含 not inspect 嘅樹號（唔包括 Removed）</p>
-    ${excelList(notInspectedList, ['no', 'sp', 'reason', 'status', 'triage'], '無 Tree not inspected')}
+    <p class="note">列出 Tree not inspected Reason／Remarks（Other reason）有內容，或 Status／Overall／Reason 含 not inspect 嘅樹號；亦包括 Remedial Action 揀 Form 2 且 Form2 Attached 有資料嘅樹（唔包括 Removed）</p>
+    ${excelList(notInspectedList, ['no', 'sp', 'reason', 'remarks', 'rem', 'form2Attached', 'status', 'triage'], '無 Tree not inspected')}
+    <h2>12. Form 2 Assessment 但 Form2 Attached 無資料　${badge(form2MissingAtt.length)}</h2>
+    <p class="note">Remedial Action 揀 Form 2 時，Form2 Attached 欄必須有資料</p>
+    ${excelList(form2MissingAtt, ['no', 'sp', 'rem', 'form2Attached', 'triage', 'status'], '無（全部 Form 2 均有 Form2 Attached）')}
   `;
 }
 
@@ -761,6 +782,7 @@ const CHECK_SHEET_HEADER_COLORS = {
   '9 Cavity': 'AD1457',
   '10 Lean': '455A64',
   '11 Not inspected': '455A64',
+  '12 Form2 no attach': 'C62828',
 };
 const CHECK_CENTER_FIELDS = new Set(['h', 'agg', 'spread', 'trunk']);
 const COPY_LIST_HEADER = '可複製 Tree No 清單';
